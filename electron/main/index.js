@@ -26,6 +26,9 @@ import {
   createOrderThroughLan,
   pingLanServer,
   discoverLanServers,
+  getOrdersFromLan,
+  getServicesFromLan,
+  getInventoryFromLan,
 } from "./lan-order-service.js";
 import { startSyncInterval, stopSyncInterval, processOutbox } from "./supabase-sync.js";
 import {
@@ -61,6 +64,15 @@ const distPath = path.join(__dirname, "../../dist");
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 
+function isDefaultStandaloneLanConfig(config) {
+  return (
+    String(config?.mode || "") === "standalone" &&
+    String(config?.host || "").trim() === "127.0.0.1" &&
+    Number(config?.port || 0) === 4510 &&
+    String(config?.token || "").trim() === ""
+  );
+}
+
 function getEffectiveLanConfig() {
   const persisted = runtimeConfigRepo.getLanConfig();
   const envMode = isDevelopment
@@ -70,14 +82,29 @@ function getEffectiveLanConfig() {
   const envPort = isDevelopment ? Number(process.env.APP_LAN_PORT || 0) : 0;
   const envToken = isDevelopment ? String(process.env.APP_LAN_TOKEN || "").trim() : "";
 
+  let mode =
+    envMode === "server" || envMode === "client" || envMode === "standalone"
+      ? envMode
+      : persisted.mode;
+  let host = envHost || persisted.host;
+  let port = Number.isInteger(envPort) && envPort > 0 ? envPort : persisted.port;
+  const token = envToken || persisted.token;
+
+  // In developer runs, treat untouched default config as client+auto to avoid silent standalone mode.
+  if (isDevelopment && !envMode && isDefaultStandaloneLanConfig(persisted)) {
+    mode = "client";
+    host = "auto";
+    port = 4510;
+  }
+
   return {
     mode:
-      envMode === "server" || envMode === "client" || envMode === "standalone"
-        ? envMode
+      mode === "server" || mode === "client" || mode === "standalone"
+        ? mode
         : persisted.mode,
-    host: envHost || persisted.host,
-    port: Number.isInteger(envPort) && envPort > 0 ? envPort : persisted.port,
-    token: envToken || persisted.token,
+    host,
+    port,
+    token,
     modeLocked: Boolean(persisted.modeLocked),
     installedRole: persisted.installedRole || null,
   };
@@ -168,6 +195,55 @@ function applyInstallerLanBootstrap(userDataPath) {
 }
 
 function getLocalNetworkIps() {
+  const isPrivateIpv4 = (address) => {
+    const parts = String(address || "").split(".").map((part) => Number(part));
+    if (parts.length !== 4 || parts.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+      return false;
+    }
+
+    if (parts[0] === 10) return true;
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    return false;
+  };
+
+  const isLinkLocalIpv4 = (address) => {
+    const parts = String(address || "").split(".").map((part) => Number(part));
+    return parts.length === 4 && parts[0] === 169 && parts[1] === 254;
+  };
+
+  const isLikelyVirtualInterface = (interfaceName) => {
+    const value = String(interfaceName || "").toLowerCase();
+    return /^(lo|lo0|utun|awdl|llw|gif|stf|anpi|docker|veth|br-|vboxnet|vmnet|zt|tailscale|wg|tap|tun|vnic)/.test(value) ||
+      value.includes("veth") ||
+      value.includes("docker") ||
+      value.includes("virtual") ||
+      value.includes("hyper-v") ||
+      value.includes("vethernet") ||
+      value.includes("vmware") ||
+      value.includes("vpn") ||
+      value.includes("hamachi") ||
+      value.includes("tailscale") ||
+      value.includes("wireguard");
+  };
+
+  const scoreAddress = (interfaceName, address) => {
+    const normalizedInterface = String(interfaceName || "").toLowerCase();
+    let score = 0;
+
+    if (isPrivateIpv4(address)) score += 50;
+    if (String(address || "").startsWith("192.168.")) score += 30;
+    if (String(address || "").startsWith("10.")) score += 20;
+    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(String(address || ""))) score += 10;
+
+    if (normalizedInterface.startsWith("en") || normalizedInterface.startsWith("eth") || normalizedInterface.includes("wifi") || normalizedInterface.includes("wi-fi") || normalizedInterface.includes("ethernet")) {
+      score += 25;
+    }
+
+    if (isLikelyVirtualInterface(interfaceName)) score -= 60;
+    return score;
+  };
+
   const interfaces = os.networkInterfaces();
   const rows = [];
 
@@ -184,17 +260,29 @@ function getLocalNetworkIps() {
         return;
       }
 
+      if (isLinkLocalIpv4(entry.address)) {
+        return;
+      }
+
       rows.push({
         interfaceName,
         family,
         address: entry.address,
         netmask: entry.netmask || "",
         cidr: entry.cidr || "",
+        _score: scoreAddress(interfaceName, entry.address),
       });
     });
   });
 
-  return rows;
+  return rows
+    .sort((a, b) => {
+      if (b._score !== a._score) {
+        return b._score - a._score;
+      }
+      return String(a.interfaceName).localeCompare(String(b.interfaceName));
+    })
+    .map(({ _score, ...row }) => row);
 }
 
 function registerAppProtocol() {
@@ -255,15 +343,36 @@ function createMainWindow() {
 }
 
 function registerDbIpcHandlers() {
-  ipcMain.handle("db:get-services", () => servicesRepo.getAll());
+  ipcMain.handle("db:get-services", async () => {
+    const config = getEffectiveLanConfig();
+    if (config.mode === "client") {
+      const resolvedConfig = await resolveClientLanConfig(config);
+      return getServicesFromLan(resolvedConfig);
+    }
+    return servicesRepo.getAll();
+  });
   ipcMain.handle("db:save-service", (_, service) => servicesRepo.save(service));
   ipcMain.handle("db:delete-service", (_, id) => servicesRepo.delete(id));
 
-  ipcMain.handle("db:get-inventory", () => inventoryRepo.getAll());
+  ipcMain.handle("db:get-inventory", async () => {
+    const config = getEffectiveLanConfig();
+    if (config.mode === "client") {
+      const resolvedConfig = await resolveClientLanConfig(config);
+      return getInventoryFromLan(resolvedConfig);
+    }
+    return inventoryRepo.getAll();
+  });
   ipcMain.handle("db:save-inventory", (_, item) => inventoryRepo.save(item));
   ipcMain.handle("db:delete-inventory", (_, id) => inventoryRepo.delete(id));
 
-  ipcMain.handle("db:get-orders", () => ordersRepo.getAll());
+  ipcMain.handle("db:get-orders", async () => {
+    const config = getEffectiveLanConfig();
+    if (config.mode === "client") {
+      const resolvedConfig = await resolveClientLanConfig(config);
+      return getOrdersFromLan(resolvedConfig);
+    }
+    return ordersRepo.getAll();
+  });
   ipcMain.handle("db:get-next-order-code", async () => {
     const config = getEffectiveLanConfig();
     if (config.mode === "client") {

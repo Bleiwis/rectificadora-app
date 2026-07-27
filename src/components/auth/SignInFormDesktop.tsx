@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { ChevronLeftIcon, EyeCloseIcon, EyeIcon } from "../../icons";
 import Label from "../form/Label";
@@ -6,6 +6,8 @@ import Input from "../form/input/InputField";
 import Checkbox from "../form/input/Checkbox";
 import Button from "../ui/button/Button";
 import { useAuth } from "../../hooks/useAuth";
+
+type SignInStep = "server" | "username" | "password" | "setup-password";
 
 export default function SignInFormDesktop() {
   const navigate = useNavigate();
@@ -17,19 +19,125 @@ export default function SignInFormDesktop() {
     requiresMasterSetup,
   } = useAuth();
 
-  const [step, setStep] = useState<"username" | "password" | "setup-password">(
-    "username",
-  );
+  const [step, setStep] = useState<SignInStep>("username");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [lanMode, setLanMode] = useState<LanMode>("standalone");
+  const [serverHost, setServerHost] = useState("");
+  const [serverToken, setServerToken] = useState("");
+  const [serverPort, setServerPort] = useState(4510);
+  const [isDiscoveringServers, setIsDiscoveringServers] = useState(false);
+  const [discoveredServers, setDiscoveredServers] = useState<LanDiscoveredServer[]>([]);
+  const [isServerConnected, setIsServerConnected] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
   const [isChecked, setIsChecked] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const refreshLanPreLoginState = async () => {
+    const [config, status] = await Promise.all([
+      window.database.getLanConfig(),
+      window.database.getLanStatus(),
+    ]);
+
+    setLanMode(config.mode);
+    setServerHost(
+      config.mode === "client" && config.host.toLowerCase() !== "auto"
+        ? config.host
+        : "",
+    );
+    setServerToken(config.token || "");
+    setServerPort(config.port || 4510);
+    setDiscoveredServers(status.discoveredServers || []);
+
+    if (config.mode === "client") {
+      if (status.remoteReachable) {
+        setIsServerConnected(true);
+        setStep("username");
+      } else {
+        setIsServerConnected(false);
+        setStep("server");
+      }
+      return;
+    }
+
+    setIsServerConnected(true);
+    setStep("username");
+  };
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    void refreshLanPreLoginState().catch((error) => {
+      if (isCancelled) return;
+      console.error(error);
+      setStep("server");
+      setIsServerConnected(false);
+      setErrorMessage("No fue posible validar la conexion LAN inicial.");
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  const handleDiscoverServers = async () => {
+    setErrorMessage(null);
+    setIsDiscoveringServers(true);
+    try {
+      const found = await window.database.discoverLanServers();
+      setDiscoveredServers(found || []);
+      if (found && found.length > 0) {
+        setServerHost(found[0].host);
+        setServerPort(found[0].port);
+      }
+    } catch (error) {
+      console.error(error);
+      setDiscoveredServers([]);
+      setErrorMessage("No fue posible detectar servidores LAN en la red.");
+    } finally {
+      setIsDiscoveringServers(false);
+    }
+  };
+
+  const handleConnectServer = async () => {
+    const host = serverHost.trim();
+    if (!host) {
+      setErrorMessage("Debes indicar la IP o hostname del servidor.");
+      return;
+    }
+
+    setErrorMessage(null);
+    try {
+      await window.database.setLanConfig({
+        mode: "client",
+        host,
+        port: serverPort,
+        token: serverToken.trim(),
+      });
+
+      const status = await window.database.getLanStatus();
+      if (!status.remoteReachable) {
+        throw new Error(
+          "No se pudo establecer conexion con el servidor LAN. Verifica IP, puerto o token.",
+        );
+      }
+
+      setIsServerConnected(true);
+      setStep("username");
+    } catch (error) {
+      setIsServerConnected(false);
+      if (error instanceof Error) {
+        setErrorMessage(error.message);
+      } else {
+        setErrorMessage("No fue posible conectar con el servidor LAN.");
+      }
+    }
+  };
 
   const handleValidateUsername = async () => {
     const usernameValue = username.trim();
@@ -83,7 +191,7 @@ export default function SignInFormDesktop() {
   };
 
   const resetToUsernameStep = () => {
-    setStep("username");
+    setStep(lanMode === "client" && !isServerConnected ? "server" : "username");
     setPassword("");
     setNewPassword("");
     setConfirmNewPassword("");
@@ -96,7 +204,9 @@ export default function SignInFormDesktop() {
     setIsSubmitting(true);
 
     try {
-      if (step === "username") {
+      if (step === "server") {
+        await handleConnectServer();
+      } else if (step === "username") {
         await handleValidateUsername();
       } else if (step === "password") {
         await handleSignInWithPassword();
@@ -131,6 +241,8 @@ export default function SignInFormDesktop() {
             Iniciar Sesion
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
+            {step === "server" &&
+              "Primero conecta este equipo al servidor LAN para habilitar el inicio de sesion."}
             {step === "username" && "Escribe tu usuario para continuar."}
             {step === "password" && "Usuario detectado. Ahora ingresa tu clave."}
             {step === "setup-password" &&
@@ -160,18 +272,79 @@ export default function SignInFormDesktop() {
 
         <form onSubmit={handleSubmit}>
           <div className="space-y-6">
-            <div>
-              <Label>
-                Usuario <span className="text-error-500">*</span>
-              </Label>
-              <Input
-                type="text"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                placeholder="admin"
-                disabled={step !== "username"}
-              />
-            </div>
+            {step === "server" && (
+              <>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
+                  Modo actual: <strong>{lanMode === "client" ? "Cliente LAN" : "Standalone/Servidor"}</strong>
+                </div>
+
+                <div>
+                  <Label>
+                    IP del servidor <span className="text-error-500">*</span>
+                  </Label>
+                  <Input
+                    type="text"
+                    value={serverHost}
+                    onChange={(event) => setServerHost(event.target.value)}
+                    placeholder="Ejemplo: 192.168.1.104"
+                  />
+                </div>
+
+                <div>
+                  <Label>Token (opcional)</Label>
+                  <Input
+                    type="text"
+                    value={serverToken}
+                    onChange={(event) => setServerToken(event.target.value)}
+                    placeholder="Solo si el servidor exige token"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleDiscoverServers}
+                    disabled={isDiscoveringServers}
+                    className="w-full rounded-lg border border-gray-300 py-2 text-sm text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    {isDiscoveringServers ? "Buscando servidor..." : "Buscar servidor en la red"}
+                  </button>
+
+                  {discoveredServers.length > 0 && (
+                    <div className="max-h-28 space-y-1 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 text-xs dark:border-gray-800 dark:bg-white/[0.02]">
+                      {discoveredServers.map((server) => (
+                        <button
+                          key={`${server.host}:${server.port}`}
+                          type="button"
+                          onClick={() => {
+                            setServerHost(server.host);
+                            setServerPort(server.port);
+                          }}
+                          className="w-full rounded px-2 py-1 text-left text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                        >
+                          {server.host}:{server.port}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {step !== "server" && (
+              <div>
+                <Label>
+                  Usuario <span className="text-error-500">*</span>
+                </Label>
+                <Input
+                  type="text"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder="admin"
+                  disabled={step === "password" || step === "setup-password"}
+                />
+              </div>
+            )}
 
             {step === "password" && (
               <div>
@@ -268,20 +441,34 @@ export default function SignInFormDesktop() {
 
             <div className="space-y-3">
               <Button className="w-full" size="sm" type="submit" disabled={isSubmitting}>
+                {isSubmitting && step === "server" && "Conectando..."}
                 {isSubmitting && step === "username" && "Validando..."}
                 {isSubmitting && step === "password" && "Ingresando..."}
                 {isSubmitting && step === "setup-password" && "Configurando..."}
+                {!isSubmitting && step === "server" && "Conectar servidor"}
                 {!isSubmitting && step === "username" && "Continuar"}
                 {!isSubmitting && step === "password" && "Iniciar sesion"}
                 {!isSubmitting && step === "setup-password" && "Configurar clave e ingresar"}
               </Button>
-              {step !== "username" && (
+              {step !== "username" && step !== "server" && (
                 <button
                   type="button"
                   onClick={resetToUsernameStep}
                   className="w-full rounded-lg border border-gray-300 py-2 text-sm text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                 >
                   Cambiar usuario
+                </button>
+              )}
+              {step !== "server" && lanMode === "client" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep("server");
+                    setErrorMessage(null);
+                  }}
+                  className="w-full rounded-lg border border-gray-300 py-2 text-sm text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                >
+                  Cambiar servidor
                 </button>
               )}
             </div>

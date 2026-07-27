@@ -1,10 +1,14 @@
 import net from "node:net";
 import dgram from "node:dgram";
-import { orderCodeRepo, ordersRepo } from "./db.js";
+import { orderCodeRepo, ordersRepo, servicesRepo, inventoryRepo } from "./db.js";
 
 let tcpServer = null;
 let tcpServerConfig = null;
 let discoveryServer = null;
+let tcpServerListening = false;
+let tcpServerLastError = null;
+let discoveryServerListening = false;
+let discoveryServerLastError = null;
 const connectedClients = new Map();
 
 const DEFAULT_DISCOVERY_PORT = 4511;
@@ -138,6 +142,21 @@ async function handleServerRequest(request, expectedToken) {
     return { id, ok: true, data: { order: savedOrder } };
   }
 
+  if (type === "orders:list") {
+    const orders = ordersRepo.getAll();
+    return { id, ok: true, data: { orders } };
+  }
+
+  if (type === "services:list") {
+    const services = servicesRepo.getAll();
+    return { id, ok: true, data: { services } };
+  }
+
+  if (type === "inventory:list") {
+    const inventory = inventoryRepo.getAll();
+    return { id, ok: true, data: { inventory } };
+  }
+
   return { id, ok: false, error: `Tipo de solicitud no soportado: ${type}` };
 }
 
@@ -156,6 +175,10 @@ export function startLanOrderServer(config) {
   }
 
   connectedClients.clear();
+  tcpServerListening = false;
+  tcpServerLastError = null;
+  discoveryServerListening = false;
+  discoveryServerLastError = null;
 
   tcpServer = net.createServer((socket) => {
     let buffer = "";
@@ -194,9 +217,57 @@ export function startLanOrderServer(config) {
     });
   });
 
-  tcpServer.listen(port, host);
+  const activeTcpServer = tcpServer;
+  activeTcpServer.on("listening", () => {
+    if (tcpServer !== activeTcpServer) return;
+    tcpServerListening = true;
+    tcpServerLastError = null;
+  });
+
+  activeTcpServer.on("close", () => {
+    if (tcpServer !== activeTcpServer) return;
+    tcpServerListening = false;
+  });
+
+  activeTcpServer.on("error", (error) => {
+    if (tcpServer !== activeTcpServer) return;
+    tcpServerListening = false;
+    tcpServerLastError = error instanceof Error ? error.message : String(error || "Unknown TCP server error");
+
+    if (discoveryServer) {
+      try {
+        discoveryServer.close();
+      } catch {
+        // Best effort shutdown.
+      }
+      discoveryServer = null;
+      discoveryServerListening = false;
+    }
+  });
+
+  activeTcpServer.listen(port, host);
   discoveryServer = dgram.createSocket("udp4");
-  discoveryServer.on("message", (msg, rinfo) => {
+  const activeDiscoveryServer = discoveryServer;
+
+  activeDiscoveryServer.on("listening", () => {
+    if (discoveryServer !== activeDiscoveryServer) return;
+    discoveryServerListening = true;
+    discoveryServerLastError = null;
+  });
+
+  activeDiscoveryServer.on("close", () => {
+    if (discoveryServer !== activeDiscoveryServer) return;
+    discoveryServerListening = false;
+  });
+
+  activeDiscoveryServer.on("error", (error) => {
+    if (discoveryServer !== activeDiscoveryServer) return;
+    discoveryServerListening = false;
+    discoveryServerLastError =
+      error instanceof Error ? error.message : String(error || "Unknown UDP discovery server error");
+  });
+
+  activeDiscoveryServer.on("message", (msg, rinfo) => {
     try {
       const payload = JSON.parse(String(msg || "{}"));
       if (payload?.type !== DISCOVERY_REQUEST_TYPE) {
@@ -212,12 +283,12 @@ export function startLanOrderServer(config) {
         }),
       );
 
-      discoveryServer.send(response, rinfo.port, rinfo.address);
+      activeDiscoveryServer.send(response, rinfo.port, rinfo.address);
     } catch {
       // Ignore malformed discovery packets.
     }
   });
-  discoveryServer.bind(discoveryPort, "0.0.0.0");
+  activeDiscoveryServer.bind(discoveryPort, "0.0.0.0");
 
   tcpServerConfig = { host, port, token };
   return { running: true, host, port };
@@ -226,6 +297,10 @@ export function startLanOrderServer(config) {
 export function stopLanOrderServer() {
   if (!tcpServer) {
     tcpServerConfig = null;
+    tcpServerListening = false;
+    tcpServerLastError = null;
+    discoveryServerListening = false;
+    discoveryServerLastError = null;
     connectedClients.clear();
     return { running: false };
   }
@@ -237,15 +312,23 @@ export function stopLanOrderServer() {
   }
   tcpServer = null;
   tcpServerConfig = null;
+  tcpServerListening = false;
+  tcpServerLastError = null;
+  discoveryServerListening = false;
+  discoveryServerLastError = null;
   connectedClients.clear();
   return { running: false };
 }
 
 export function getLanOrderServerStatus() {
   return {
-    running: Boolean(tcpServer),
+    running: Boolean(tcpServer && tcpServerListening),
     host: tcpServerConfig?.host || null,
     port: tcpServerConfig?.port || null,
+    listenReady: Boolean(tcpServerListening),
+    lastError: tcpServerLastError,
+    discoveryReady: Boolean(discoveryServer && discoveryServerListening),
+    discoveryLastError: discoveryServerLastError,
     connectedClients: getConnectedClientList(),
   };
 }
@@ -339,6 +422,42 @@ export async function pingLanServer(config) {
     timeoutMs: 1500,
   });
   return true;
+}
+
+export async function getOrdersFromLan(config) {
+  const data = await requestLanServer({
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    type: "orders:list",
+    timeoutMs: 6000,
+  });
+
+  return Array.isArray(data?.orders) ? data.orders : [];
+}
+
+export async function getServicesFromLan(config) {
+  const data = await requestLanServer({
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    type: "services:list",
+    timeoutMs: 4000,
+  });
+
+  return Array.isArray(data?.services) ? data.services : [];
+}
+
+export async function getInventoryFromLan(config) {
+  const data = await requestLanServer({
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    type: "inventory:list",
+    timeoutMs: 4000,
+  });
+
+  return Array.isArray(data?.inventory) ? data.inventory : [];
 }
 
 export async function discoverLanServers(options = {}) {

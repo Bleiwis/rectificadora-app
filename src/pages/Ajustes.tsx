@@ -21,6 +21,10 @@ type LanStatus = {
     running: boolean;
     host: string | null;
     port: number | null;
+    listenReady?: boolean;
+    lastError?: string | null;
+    discoveryReady?: boolean;
+    discoveryLastError?: string | null;
     connectedClients?: LanConnectedClient[];
   };
   remoteReachable: boolean;
@@ -164,12 +168,50 @@ export default function Ajustes() {
     }
   };
 
-  const serverIpSuggestion = localIps[0]?.address || "No detectada";
+  const selectBestServerIp = (ips: LocalNetworkIp[]) => {
+    if (!Array.isArray(ips) || ips.length === 0) {
+      return "No detectada";
+    }
+
+    const isPrivate = (address: string) =>
+      /^192\.168\./.test(address) || /^10\./.test(address) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(address);
+
+    const isLikelyVirtual = (interfaceName: string) => {
+      const value = String(interfaceName || "").toLowerCase();
+      return (
+        value.includes("docker") ||
+        value.includes("virtual") ||
+        value.includes("vethernet") ||
+        value.includes("vmware") ||
+        value.includes("vpn") ||
+        value.includes("tailscale") ||
+        value.includes("wireguard") ||
+        value.startsWith("utun")
+      );
+    };
+
+    const scored = ips
+      .map((ip) => {
+        let score = 0;
+        if (isPrivate(ip.address)) score += 50;
+        if (ip.address.startsWith("192.168.")) score += 25;
+        if (ip.address.startsWith("10.")) score += 15;
+        if (isLikelyVirtual(ip.interfaceName)) score -= 60;
+        return { ip, score };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    return scored[0]?.ip?.address || ips[0].address;
+  };
+
+  const serverIpSuggestion = selectBestServerIp(localIps);
   const serverConnectionAddress =
     lanStatus?.serverStatus.host && lanStatus.serverStatus.host !== "0.0.0.0"
       ? lanStatus.serverStatus.host
       : serverIpSuggestion;
   const connectedClients = lanStatus?.serverStatus.connectedClients || [];
+  const serverRuntimeError = lanStatus?.serverStatus.lastError || null;
+  const discoveryRuntimeError = lanStatus?.serverStatus.discoveryLastError || null;
 
   if (!isAdmin) {
     return <Navigate to="/" replace />;
@@ -413,6 +455,15 @@ export default function Ajustes() {
                 </div>
               )}
             </div>
+
+            {(serverRuntimeError || discoveryRuntimeError) && (
+              <div className="mt-4 rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-700 dark:border-red-800/70 dark:bg-red-950/30 dark:text-red-300">
+                <p className="font-semibold">Diagnóstico LAN del servidor</p>
+                {serverRuntimeError ? <p className="mt-1">Error TCP: {serverRuntimeError}</p> : null}
+                {discoveryRuntimeError ? <p className="mt-1">Error UDP discovery: {discoveryRuntimeError}</p> : null}
+                <p className="mt-1">Revisa si el puerto está ocupado o bloqueado por firewall.</p>
+              </div>
+            )}
           </div>
         )}
 

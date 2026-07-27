@@ -92,6 +92,10 @@ type LanStatus = {
     running: boolean;
     host: string | null;
     port: number | null;
+    listenReady?: boolean;
+    lastError?: string | null;
+    discoveryReady?: boolean;
+    discoveryLastError?: string | null;
     connectedClients?: LanConnectedClient[];
   };
   remoteReachable: boolean;
