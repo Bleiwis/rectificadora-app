@@ -1,0 +1,61 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime data and PID files
+pids
+*.pid
+*.pid.lock
+
+# Dependency directories
+node_modules
+
+# Build outputs
+dist
+dist-ssr
+release
+out
+build/*.tmp
+
+# Electron builder caches and unpacked bundles
+.electron
+.cache
+.turbo
+
+# Coverage and test artifacts
+coverage
+.nyc_output
+
+# Environment files (keep examples only)
+.env
+.env.*
+!.env.example
+
+# Local SQLite and app runtime files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Misc local files
+*.local
+*.orig
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
