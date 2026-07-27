@@ -488,6 +488,31 @@ function registerDbIpcHandlers() {
   ipcMain.handle("db:discover-lan-servers", async () => {
     return discoverLanServers({ timeoutMs: 1500 });
   });
+  ipcMain.handle("db:probe-lan-server", async (_, input) => {
+    const host = String(input?.host || "").trim();
+    const port = Number(input?.port || 4510);
+    const token = String(input?.token || "").trim();
+
+    if (!host) {
+      return {
+        reachable: false,
+        error: "Host LAN inválido para validación.",
+      };
+    }
+
+    try {
+      await pingLanServer({ host, port, token });
+      return {
+        reachable: true,
+        error: null,
+      };
+    } catch (error) {
+      return {
+        reachable: false,
+        error: error instanceof Error ? error.message : "No se pudo conectar al servidor LAN.",
+      };
+    }
+  });
   ipcMain.handle("db:get-local-network-ips", () => getLocalNetworkIps());
 }
 

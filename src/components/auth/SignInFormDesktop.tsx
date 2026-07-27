@@ -9,6 +9,12 @@ import { useAuth } from "../../hooks/useAuth";
 
 type SignInStep = "server" | "username" | "password" | "setup-password";
 
+type DiscoveryFeedback = {
+  kind: "idle" | "searching" | "success" | "empty" | "error";
+  message: string;
+  updatedAt: string | null;
+};
+
 export default function SignInFormDesktop() {
   const navigate = useNavigate();
   const {
@@ -30,6 +36,11 @@ export default function SignInFormDesktop() {
   const [serverPort, setServerPort] = useState(4510);
   const [isDiscoveringServers, setIsDiscoveringServers] = useState(false);
   const [discoveredServers, setDiscoveredServers] = useState<LanDiscoveredServer[]>([]);
+  const [discoveryFeedback, setDiscoveryFeedback] = useState<DiscoveryFeedback>({
+    kind: "idle",
+    message: "Todavía no se ha ejecutado una búsqueda de servidor.",
+    updatedAt: null,
+  });
   const [isServerConnected, setIsServerConnected] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -53,6 +64,14 @@ export default function SignInFormDesktop() {
     setServerToken(config.token || "");
     setServerPort(config.port || 4510);
     setDiscoveredServers(status.discoveredServers || []);
+
+    if ((status.discoveredServers || []).length > 0) {
+      setDiscoveryFeedback({
+        kind: "idle",
+        message: `Último escaneo guardado: ${(status.discoveredServers || []).length} servidor(es) detectado(s) por broadcast.`,
+        updatedAt: new Date().toISOString(),
+      });
+    }
 
     if (config.mode === "client") {
       if (status.remoteReachable) {
@@ -87,18 +106,88 @@ export default function SignInFormDesktop() {
 
   const handleDiscoverServers = async () => {
     setErrorMessage(null);
+    setDiscoveryFeedback({
+      kind: "searching",
+      message: "Buscando servidores LAN...",
+      updatedAt: new Date().toISOString(),
+    });
     setIsDiscoveringServers(true);
     try {
       const found = await window.database.discoverLanServers();
-      setDiscoveredServers(found || []);
-      if (found && found.length > 0) {
-        setServerHost(found[0].host);
-        setServerPort(found[0].port);
+      const discovered = Array.isArray(found) ? found : [];
+      const verified = await Promise.all(
+        discovered.map(async (server) => {
+          try {
+            const probe = await window.database.probeLanServer({
+              host: server.host,
+              port: server.port,
+              token: serverToken.trim(),
+            });
+
+            return {
+              ...server,
+              reachable: Boolean(probe.reachable),
+              probeError: probe.error || null,
+            };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Error desconocido al validar servidor.";
+            const probeUnavailable = message.includes("No handler registered for 'db:probe-lan-server'");
+
+            return {
+              ...server,
+              reachable: probeUnavailable ? undefined : false,
+              probeError: probeUnavailable ? "PROBE_UNAVAILABLE" : message,
+            };
+          }
+        }),
+      );
+
+      setDiscoveredServers(verified);
+
+      if (verified.length > 0) {
+        const reachableCount = verified.filter((server) => server.reachable).length;
+        const probeUnavailable = verified.some((server) => server.probeError === "PROBE_UNAVAILABLE");
+        const preferred = verified.find((server) => server.reachable) || verified[0];
+        setServerHost(preferred.host);
+        setServerPort(preferred.port);
+
+        if (reachableCount > 0) {
+          setDiscoveryFeedback({
+            kind: "success",
+            message: `Escaneo completado: ${verified.length} detectado(s), ${reachableCount} conectable(s). Se seleccionó ${preferred.host}:${preferred.port}.`,
+            updatedAt: new Date().toISOString(),
+          });
+        } else if (probeUnavailable) {
+          setDiscoveryFeedback({
+            kind: "empty",
+            message:
+              `Escaneo completado: ${verified.length} detectado(s) por broadcast, pero esta ejecución no puede validar conexión TCP. Reinicia la app de escritorio para cargar el handler nuevo.`,
+            updatedAt: new Date().toISOString(),
+          });
+        } else {
+          setDiscoveryFeedback({
+            kind: "empty",
+            message:
+              `Escaneo completado: ${verified.length} detectado(s) por broadcast, pero ninguno respondió por conexión TCP.`,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } else {
+        setDiscoveryFeedback({
+          kind: "empty",
+          message: "Escaneo completado: no se detectaron servidores LAN.",
+          updatedAt: new Date().toISOString(),
+        });
       }
     } catch (error) {
       console.error(error);
       setDiscoveredServers([]);
-      setErrorMessage("No fue posible detectar servidores LAN en la red.");
+      const detail = error instanceof Error ? error.message : "Error desconocido";
+      setDiscoveryFeedback({
+        kind: "error",
+        message: `Falló la búsqueda de servidor: ${detail}`,
+        updatedAt: new Date().toISOString(),
+      });
     } finally {
       setIsDiscoveringServers(false);
     }
@@ -310,6 +399,25 @@ export default function SignInFormDesktop() {
                     {isDiscoveringServers ? "Buscando servidor..." : "Buscar servidor en la red"}
                   </button>
 
+                  <div
+                    className={`rounded-lg border px-3 py-2 text-xs ${
+                      discoveryFeedback.kind === "error"
+                        ? "border-red-300 bg-red-50 text-red-700 dark:border-red-800/70 dark:bg-red-950/30 dark:text-red-300"
+                        : discoveryFeedback.kind === "success"
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200"
+                          : discoveryFeedback.kind === "empty"
+                            ? "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-300"
+                            : "border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300"
+                    }`}
+                  >
+                    <p>{discoveryFeedback.message}</p>
+                    {discoveryFeedback.updatedAt ? (
+                      <p className="mt-1 opacity-80">
+                        Último escaneo: {new Date(discoveryFeedback.updatedAt).toLocaleString()}
+                      </p>
+                    ) : null}
+                  </div>
+
                   {discoveredServers.length > 0 && (
                     <div className="max-h-28 space-y-1 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 text-xs dark:border-gray-800 dark:bg-white/[0.02]">
                       {discoveredServers.map((server) => (
@@ -322,7 +430,22 @@ export default function SignInFormDesktop() {
                           }}
                           className="w-full rounded px-2 py-1 text-left text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
                         >
-                          {server.host}:{server.port}
+                          <div>{server.host}:{server.port}</div>
+                          <div
+                            className={`${
+                              server.reachable
+                                ? "text-emerald-700 dark:text-emerald-300"
+                                : server.probeError === "PROBE_UNAVAILABLE"
+                                  ? "text-blue-700 dark:text-blue-300"
+                                : "text-amber-700 dark:text-amber-300"
+                            }`}
+                          >
+                            {server.reachable
+                              ? "Conectable"
+                              : server.probeError === "PROBE_UNAVAILABLE"
+                                ? "Detectado (sin validación TCP en esta ejecución)"
+                                : "Detectado, pero no conectable"}
+                          </div>
                         </button>
                       ))}
                     </div>

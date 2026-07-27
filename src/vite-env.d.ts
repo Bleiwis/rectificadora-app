@@ -118,6 +118,8 @@ type LanDiscoveredServer = {
   port: number;
   tokenRequired: boolean;
   discoveredAt: string;
+  reachable?: boolean;
+  probeError?: string | null;
 };
 
 type LocalNetworkIp = {
@@ -172,6 +174,7 @@ interface Window {
     setLanConfig: (config: Partial<LanConfig>) => Promise<LanConfig>;
     getLanStatus: () => Promise<LanStatus>;
     discoverLanServers: () => Promise<LanDiscoveredServer[]>;
+    probeLanServer: (payload: { host: string; port?: number; token?: string }) => Promise<{ reachable: boolean; error: string | null }>;
     getLocalNetworkIps: () => Promise<LocalNetworkIp[]>;
   };
   license?: {

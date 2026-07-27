@@ -55,6 +55,14 @@ type LanDiscoveredServer = {
   port: number;
   tokenRequired: boolean;
   discoveredAt: string;
+  reachable?: boolean;
+  probeError?: string | null;
+};
+
+type DiscoveryFeedback = {
+  kind: "idle" | "searching" | "success" | "empty" | "error";
+  message: string;
+  updatedAt: string | null;
 };
 
 export default function Ajustes() {
@@ -72,6 +80,11 @@ export default function Ajustes() {
   const [isLoadingLocalIps, setIsLoadingLocalIps] = useState(false);
   const [isDiscoveringServers, setIsDiscoveringServers] = useState(false);
   const [discoveredServers, setDiscoveredServers] = useState<LanDiscoveredServer[]>([]);
+  const [discoveryFeedback, setDiscoveryFeedback] = useState<DiscoveryFeedback>({
+    kind: "idle",
+    message: "Aún no has ejecutado una búsqueda de servidor.",
+    updatedAt: null,
+  });
   const [isSavingLanConfig, setIsSavingLanConfig] = useState(false);
 
   const refreshLanState = useCallback(async (showErrors = false) => {
@@ -132,22 +145,92 @@ export default function Ajustes() {
   };
 
   const handleDiscoverServers = async () => {
+    setDiscoveryFeedback({
+      kind: "searching",
+      message: "Buscando servidor LAN en la red...",
+      updatedAt: new Date().toISOString(),
+    });
     setIsDiscoveringServers(true);
     try {
       const found = await window.database.discoverLanServers();
-      setDiscoveredServers(found || []);
-      if (found && found.length > 0) {
-        const preferred = found[0];
+      const discovered = Array.isArray(found) ? found : [];
+
+      const verified = await Promise.all(
+        discovered.map(async (server) => {
+          try {
+            const probe = await window.database.probeLanServer({
+              host: server.host,
+              port: server.port,
+              token: lanConfig.token || "",
+            });
+
+            return {
+              ...server,
+              reachable: Boolean(probe.reachable),
+              probeError: probe.error || null,
+            };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Error desconocido al validar servidor.";
+            const probeUnavailable = message.includes("No handler registered for 'db:probe-lan-server'");
+
+            return {
+              ...server,
+              reachable: probeUnavailable ? undefined : false,
+              probeError: probeUnavailable ? "PROBE_UNAVAILABLE" : message,
+            };
+          }
+        }),
+      );
+
+      setDiscoveredServers(verified);
+
+      if (verified.length > 0) {
+        const reachableCount = verified.filter((server) => server.reachable).length;
+        const probeUnavailable = verified.some((server) => server.probeError === "PROBE_UNAVAILABLE");
+        const preferred = verified.find((server) => server.reachable) || verified[0];
         setLanConfig((prev) => ({
           ...prev,
           host: preferred.host,
           port: preferred.port,
         }));
+
+        if (reachableCount > 0) {
+          setDiscoveryFeedback({
+            kind: "success",
+            message: `Escaneo completado: ${verified.length} detectado(s), ${reachableCount} alcanzable(s) por conexión. Se autocompletó ${preferred.host}:${preferred.port}.`,
+            updatedAt: new Date().toISOString(),
+          });
+        } else if (probeUnavailable) {
+          setDiscoveryFeedback({
+            kind: "empty",
+            message:
+              `Escaneo completado: ${verified.length} detectado(s) por broadcast, pero esta ejecución no puede validar conexión TCP. Reinicia la app de escritorio para cargar el handler nuevo.`,
+            updatedAt: new Date().toISOString(),
+          });
+        } else {
+          setDiscoveryFeedback({
+            kind: "empty",
+            message:
+              `Escaneo completado: ${verified.length} detectado(s) por broadcast, pero ninguno respondió conexión TCP. Revisa firewall/puerto del servidor.`,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } else {
+        setDiscoveryFeedback({
+          kind: "empty",
+          message: "Escaneo completado: no se detectaron servidores LAN.",
+          updatedAt: new Date().toISOString(),
+        });
       }
     } catch (error) {
       console.error(error);
       setDiscoveredServers([]);
-      alert("No fue posible escanear la red local.");
+      const detail = error instanceof Error ? error.message : "Error desconocido";
+      setDiscoveryFeedback({
+        kind: "error",
+        message: `Falló la búsqueda de servidor: ${detail}`,
+        updatedAt: new Date().toISOString(),
+      });
     } finally {
       setIsDiscoveringServers(false);
     }
@@ -318,10 +401,33 @@ export default function Ajustes() {
               </button>
             </div>
 
+            <div
+              className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+                discoveryFeedback.kind === "error"
+                  ? "border-red-300 bg-red-50 text-red-700 dark:border-red-800/70 dark:bg-red-950/30 dark:text-red-300"
+                  : discoveryFeedback.kind === "success"
+                    ? "border-emerald-300 bg-emerald-100 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100"
+                    : discoveryFeedback.kind === "empty"
+                      ? "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-300"
+                      : "border-emerald-200 bg-white text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100"
+              }`}
+            >
+              <p>{discoveryFeedback.message}</p>
+              {discoveryFeedback.updatedAt ? (
+                <p className="mt-1 opacity-80">
+                  Último escaneo: {new Date(discoveryFeedback.updatedAt).toLocaleString()}
+                </p>
+              ) : null}
+            </div>
+
             <div className="mt-3 space-y-2">
-              {discoveredServers.length === 0 ? (
+              {isDiscoveringServers ? (
                 <p className="text-xs text-emerald-900/90 dark:text-emerald-100/90">
-                  Sin resultados de escaneo.
+                  Ejecutando escaneo...
+                </p>
+              ) : discoveredServers.length === 0 ? (
+                <p className="text-xs text-emerald-900/90 dark:text-emerald-100/90">
+                  Sin servidores detectados en el último escaneo.
                 </p>
               ) : (
                 discoveredServers.map((server) => (
@@ -329,9 +435,26 @@ export default function Ajustes() {
                     key={`${server.host}:${server.port}`}
                     className="flex items-center justify-between rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs dark:border-emerald-800 dark:bg-emerald-950/30"
                   >
-                    <span className="text-emerald-900 dark:text-emerald-100">
-                      {server.host}:{server.port}
-                    </span>
+                    <div>
+                      <span className="text-emerald-900 dark:text-emerald-100">
+                        {server.host}:{server.port}
+                      </span>
+                      <p
+                        className={`mt-0.5 ${
+                          server.reachable
+                            ? "text-emerald-700 dark:text-emerald-300"
+                            : server.probeError === "PROBE_UNAVAILABLE"
+                              ? "text-blue-700 dark:text-blue-300"
+                            : "text-amber-700 dark:text-amber-300"
+                        }`}
+                      >
+                        {server.reachable
+                          ? "Conectable"
+                          : server.probeError === "PROBE_UNAVAILABLE"
+                            ? "Detectado (sin validación TCP en esta ejecución)"
+                            : "Detectado, pero no conectable"}
+                      </p>
+                    </div>
                     <button
                       type="button"
                       onClick={() =>

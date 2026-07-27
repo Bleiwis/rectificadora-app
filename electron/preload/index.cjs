@@ -87,6 +87,7 @@ const DB_CHANNELS = {
   setLanConfig: "db:set-lan-config",
   getLanStatus: "db:get-lan-status",
   discoverLanServers: "db:discover-lan-servers",
+  probeLanServer: "db:probe-lan-server",
   getLocalNetworkIps: "db:get-local-network-ips",
 };
 
@@ -182,6 +183,9 @@ contextBridge.exposeInMainWorld("database", {
   },
   discoverLanServers() {
     return ipcRenderer.invoke(DB_CHANNELS.discoverLanServers);
+  },
+  probeLanServer(payload) {
+    return ipcRenderer.invoke(DB_CHANNELS.probeLanServer, payload);
   },
   getLocalNetworkIps() {
     return ipcRenderer.invoke(DB_CHANNELS.getLocalNetworkIps);
