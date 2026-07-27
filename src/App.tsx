@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { HashRouter as Router, Routes, Route, Navigate } from "react-router";
 import SignIn from "./pages/AuthPages/SignIn";
 import SetupMaster from "./pages/AuthPages/SetupMaster";
@@ -76,20 +76,35 @@ const LicenseBlockedScreen = ({ license }: { license: LicenseStatusPayload }) =>
   );
 };
 
-const LicenseWarningBanner = ({ license }: { license: LicenseStatusPayload }) => {
+const LicenseWarningBanner = ({
+  license,
+  onClose,
+}: {
+  license: LicenseStatusPayload;
+  onClose: () => void;
+}) => {
   const isTrial = license.reason === "trial-active-missing-license";
 
   return (
     <div className="fixed left-1/2 top-20 z-[100000] w-[min(92vw,920px)] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-lg dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200 lg:top-24">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <p className="font-medium">
-          {isTrial
-            ? `Modo prueba activo: restan ${license.daysUntilBlock} dia(s) para el bloqueo automatico.`
-            : `Aviso de licencia: restan ${license.daysUntilBlock} dia(s) para el bloqueo automatico por pago pendiente.`}
-        </p>
-        <p className="text-xs opacity-90">
-          Corte: {license.blockAt || "No disponible"} | Instalacion: {license.installationId}
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-medium">
+            {isTrial
+              ? `Modo prueba activo: restan ${license.daysUntilBlock} dia(s) para el bloqueo automatico.`
+              : `Aviso de licencia: restan ${license.daysUntilBlock} dia(s) para el bloqueo automatico por pago pendiente.`}
+          </p>
+          <p className="mt-1 text-xs opacity-90">
+            Corte: {license.blockAt || "No disponible"} | Instalacion: {license.installationId}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md border border-amber-300 px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-200 dark:hover:bg-amber-900/40"
+        >
+          Cerrar
+        </button>
       </div>
     </div>
   );
@@ -102,6 +117,8 @@ const RequireAuth = ({ children }: { children: ReactNode }) => {
     null,
   );
   const [isLicenseLoading, setIsLicenseLoading] = useState(true);
+  const [showLicenseWarningBanner, setShowLicenseWarningBanner] = useState(false);
+  const hasInitializedWarningRef = useRef(false);
 
   useEffect(() => {
     const licenseApi = typeof window !== "undefined" ? window.license : undefined;
@@ -130,6 +147,10 @@ const RequireAuth = ({ children }: { children: ReactNode }) => {
         const refreshedStatus = await licenseApi.refresh();
         if (!isCancelled) {
           setLicenseState(refreshedStatus);
+          if (!hasInitializedWarningRef.current) {
+            setShowLicenseWarningBanner(refreshedStatus?.status === "warning");
+            hasInitializedWarningRef.current = true;
+          }
         }
 
         intervalId = window.setInterval(() => {
@@ -149,6 +170,10 @@ const RequireAuth = ({ children }: { children: ReactNode }) => {
       } catch {
         if (!isCancelled) {
           setLicenseState(null);
+          if (!hasInitializedWarningRef.current) {
+            setShowLicenseWarningBanner(false);
+            hasInitializedWarningRef.current = true;
+          }
         }
       } finally {
         if (!isCancelled) {
@@ -164,6 +189,7 @@ const RequireAuth = ({ children }: { children: ReactNode }) => {
       if (intervalId) {
         window.clearInterval(intervalId);
       }
+      hasInitializedWarningRef.current = false;
     };
   }, [isDesktopAuthAvailable, user]);
 
@@ -197,8 +223,11 @@ const RequireAuth = ({ children }: { children: ReactNode }) => {
 
   return (
     <>
-      {licenseState?.status === "warning" ? (
-        <LicenseWarningBanner license={licenseState} />
+      {licenseState?.status === "warning" && showLicenseWarningBanner ? (
+        <LicenseWarningBanner
+          license={licenseState}
+          onClose={() => setShowLicenseWarningBanner(false)}
+        />
       ) : null}
       {children}
     </>

@@ -33,7 +33,17 @@ function loadEnvFile(filePath) {
 }
 
 function writeRuntimeEnvBundle(filePath, envMap) {
-  const entries = Object.entries(envMap || {}).filter(([, value]) => String(value || "").trim() !== "");
+  const excludedRuntimeKeys = new Set([
+    "APP_DEPLOYMENT_MODE",
+    "APP_LAN_HOST",
+    "APP_LAN_PORT",
+    "APP_LAN_TOKEN",
+  ]);
+
+  const entries = Object.entries(envMap || {}).filter(([key, value]) => {
+    if (excludedRuntimeKeys.has(String(key || "").trim())) return false;
+    return String(value || "").trim() !== "";
+  });
 
   if (entries.length === 0) {
     if (fs.existsSync(filePath)) {

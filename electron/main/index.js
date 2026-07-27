@@ -63,10 +63,12 @@ const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 
 function getEffectiveLanConfig() {
   const persisted = runtimeConfigRepo.getLanConfig();
-  const envMode = String(process.env.APP_DEPLOYMENT_MODE || "").trim().toLowerCase();
-  const envHost = String(process.env.APP_LAN_HOST || "").trim();
-  const envPort = Number(process.env.APP_LAN_PORT || 0);
-  const envToken = String(process.env.APP_LAN_TOKEN || "").trim();
+  const envMode = isDevelopment
+    ? String(process.env.APP_DEPLOYMENT_MODE || "").trim().toLowerCase()
+    : "";
+  const envHost = isDevelopment ? String(process.env.APP_LAN_HOST || "").trim() : "";
+  const envPort = isDevelopment ? Number(process.env.APP_LAN_PORT || 0) : 0;
+  const envToken = isDevelopment ? String(process.env.APP_LAN_TOKEN || "").trim() : "";
 
   return {
     mode:
@@ -76,6 +78,8 @@ function getEffectiveLanConfig() {
     host: envHost || persisted.host,
     port: Number.isInteger(envPort) && envPort > 0 ? envPort : persisted.port,
     token: envToken || persisted.token,
+    modeLocked: Boolean(persisted.modeLocked),
+    installedRole: persisted.installedRole || null,
   };
 }
 
@@ -118,8 +122,15 @@ async function resolveClientLanConfig(baseConfig) {
 }
 
 function applyInstallerLanBootstrap(userDataPath) {
-  const bootstrapPath = path.join(userDataPath, "installer-lan-config.txt");
-  if (!fs.existsSync(bootstrapPath)) {
+  const appDataPath = process.env.APPDATA || "";
+  const candidatePaths = [
+    path.join(userDataPath, "installer-lan-config.txt"),
+    appDataPath ? path.join(appDataPath, "Rectificadora App", "installer-lan-config.txt") : "",
+    appDataPath ? path.join(appDataPath, "tailadmin-react", "installer-lan-config.txt") : "",
+  ].filter(Boolean);
+
+  const bootstrapPath = candidatePaths.find((candidatePath) => fs.existsSync(candidatePath));
+  if (!bootstrapPath) {
     return;
   }
 
@@ -145,6 +156,10 @@ function applyInstallerLanBootstrap(userDataPath) {
       port: values.port,
       token: values.token,
     });
+
+    if (values.mode === "server" || values.mode === "client" || values.mode === "standalone") {
+      runtimeConfigRepo.setLanModeLock(true, values.mode);
+    }
 
     fs.unlinkSync(bootstrapPath);
   } catch (error) {
@@ -312,7 +327,23 @@ function registerDbIpcHandlers() {
 
   ipcMain.handle("db:get-lan-config", () => getEffectiveLanConfig());
   ipcMain.handle("db:set-lan-config", (_, input) => {
-    const next = runtimeConfigRepo.saveLanConfig(input || {});
+    const current = runtimeConfigRepo.getLanConfig();
+    const requestedMode = String(input?.mode || "").trim();
+    if (
+      current.modeLocked &&
+      (requestedMode === "server" || requestedMode === "client" || requestedMode === "standalone") &&
+      requestedMode !== current.mode
+    ) {
+      throw new Error(
+        `El modo LAN está bloqueado por instalación (${current.installedRole || current.mode}) y no puede modificarse.`,
+      );
+    }
+
+    const next = runtimeConfigRepo.saveLanConfig({
+      ...(input || {}),
+      modeLocked: current.modeLocked,
+      installedRole: current.installedRole,
+    });
     applyLanServerMode();
     return next;
   });

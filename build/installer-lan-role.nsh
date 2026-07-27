@@ -100,5 +100,13 @@ write_config:
   FileWrite $1 "port=4510$\r$\n"
   FileWrite $1 "token=$\r$\n"
   FileClose $1
+
+  CreateDirectory "$APPDATA\${APP_FILENAME}"
+  FileOpen $1 "$APPDATA\${APP_FILENAME}\installer-lan-config.txt" w
+  FileWrite $1 "mode=$0$\r$\n"
+  FileWrite $1 "host=$2$\r$\n"
+  FileWrite $1 "port=4510$\r$\n"
+  FileWrite $1 "token=$\r$\n"
+  FileClose $1
 !macroend
 !endif

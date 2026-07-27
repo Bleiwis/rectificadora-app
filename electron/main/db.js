@@ -747,7 +747,7 @@ export const inventoryRepo = {
 export const runtimeConfigRepo = {
   getLanConfig: () => {
     const rows = getDb()
-      .prepare("SELECT key, value FROM app_runtime_config WHERE key IN ('lan_mode', 'lan_host', 'lan_port', 'lan_token')")
+      .prepare("SELECT key, value FROM app_runtime_config WHERE key IN ('lan_mode', 'lan_host', 'lan_port', 'lan_token', 'lan_mode_locked', 'lan_installed_role')")
       .all();
 
     const byKey = new Map(rows.map((r) => [r.key, r.value]));
@@ -755,12 +755,16 @@ export const runtimeConfigRepo = {
     const host = String(byKey.get("lan_host") || DEFAULT_LAN_CONFIG.host);
     const port = Number(byKey.get("lan_port") || DEFAULT_LAN_CONFIG.port);
     const token = String(byKey.get("lan_token") || DEFAULT_LAN_CONFIG.token);
+    const modeLocked = String(byKey.get("lan_mode_locked") || "false") === "true";
+    const installedRole = String(byKey.get("lan_installed_role") || "").trim();
 
     return {
       mode: mode === "server" || mode === "client" ? mode : "standalone",
       host,
       port: Number.isFinite(port) && port > 0 ? port : DEFAULT_LAN_CONFIG.port,
       token,
+      modeLocked,
+      installedRole: installedRole || null,
     };
   },
   saveLanConfig: (input) => {
@@ -788,7 +792,22 @@ export const runtimeConfigRepo = {
     upsert.run("lan_host", next.host, now);
     upsert.run("lan_port", String(next.port), now);
     upsert.run("lan_token", next.token, now);
-    return next;
+    return {
+      ...next,
+      modeLocked: input?.modeLocked === true,
+      installedRole: input?.installedRole || null,
+    };
+  },
+  setLanModeLock: (locked, role) => {
+    const now = new Date().toISOString();
+    const upsert = getDb().prepare(`
+      INSERT INTO app_runtime_config (key, value, updatedAt)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt
+    `);
+
+    upsert.run("lan_mode_locked", locked ? "true" : "false", now);
+    upsert.run("lan_installed_role", String(role || "").trim(), now);
   },
 };
 

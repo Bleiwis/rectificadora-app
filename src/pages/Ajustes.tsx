@@ -11,6 +11,8 @@ type LanConfig = {
   host: string;
   port: number;
   token: string;
+  modeLocked?: boolean;
+  installedRole?: LanMode | null;
 };
 
 type LanStatus = {
@@ -196,6 +198,7 @@ export default function Ajustes() {
             <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Modo</label>
             <select
               value={lanConfig.mode}
+              disabled={Boolean(lanConfig.modeLocked)}
               onChange={(e) => {
                 const nextMode = e.target.value as LanMode;
                 setLanConfig((prev) => ({
@@ -215,6 +218,11 @@ export default function Ajustes() {
               <option value="server">Servidor LAN</option>
               <option value="client">Cliente LAN</option>
             </select>
+            {lanConfig.modeLocked ? (
+              <p className="mt-1 text-xxs text-amber-600 dark:text-amber-400">
+                Este equipo fue instalado en modo {lanConfig.installedRole || lanConfig.mode} y el modo está bloqueado.
+              </p>
+            ) : null}
           </div>
 
           <div className="sm:col-span-2">

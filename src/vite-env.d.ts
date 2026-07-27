@@ -82,6 +82,8 @@ type LanConfig = {
   host: string;
   port: number;
   token: string;
+  modeLocked?: boolean;
+  installedRole?: LanMode | null;
 };
 
 type LanStatus = {
