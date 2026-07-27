@@ -1,25 +1,5 @@
+import "./runtime-env.js";
 import { outboxRepo } from "./db.js";
-import fs from "fs";
-import path from "path";
-
-// Load environment variables manually from .env file
-try {
-  const envPath = path.join(process.cwd(), ".env");
-  if (fs.existsSync(envPath)) {
-    const envContent = fs.readFileSync(envPath, "utf-8");
-    envContent.split("\n").forEach((line) => {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith("#")) {
-        const [key, ...valueParts] = trimmed.split("=");
-        if (key && valueParts.length > 0) {
-          process.env[key.trim()] = valueParts.join("=").trim();
-        }
-      }
-    });
-  }
-} catch (err) {
-  console.error("Failed to load .env manually:", err.message);
-}
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://yggvesadklajxabddzkp.supabase.co";
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || "";

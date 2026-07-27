@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 function loadEnvFile(filePath) {
+  const loaded = {};
   if (!fs.existsSync(filePath)) return;
 
   const content = fs.readFileSync(filePath, "utf8");
@@ -25,7 +26,32 @@ function loadEnvFile(filePath) {
     }
 
     process.env[key] = value;
+    loaded[key] = value;
   }
+
+  return loaded;
+}
+
+function writeRuntimeEnvBundle(filePath, envMap) {
+  const entries = Object.entries(envMap || {}).filter(([, value]) => String(value || "").trim() !== "");
+
+  if (entries.length === 0) {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    return;
+  }
+
+  const lines = [
+    "# Auto-generated at build time. Do not edit manually.",
+    "# This file is bundled with the installer for runtime config on target devices.",
+  ];
+
+  for (const [key, value] of entries.sort(([a], [b]) => a.localeCompare(b))) {
+    lines.push(`${key}=${String(value)}`);
+  }
+
+  fs.writeFileSync(filePath, `${lines.join("\n")}\n`, "utf8");
 }
 
 function runCommand(command, args) {
@@ -41,7 +67,8 @@ function runCommand(command, args) {
 }
 
 const workspaceRoot = process.cwd();
-loadEnvFile(path.join(workspaceRoot, ".env"));
+const loadedEnv = loadEnvFile(path.join(workspaceRoot, ".env")) || {};
+writeRuntimeEnvBundle(path.join(workspaceRoot, "electron/main/runtime-env.generated"), loadedEnv);
 
 runCommand("npm", ["run", "build:web"]);
 runCommand("npm", ["exec", "electron-builder", "--", "--win"]);

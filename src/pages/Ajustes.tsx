@@ -19,9 +19,21 @@ type LanStatus = {
     running: boolean;
     host: string | null;
     port: number | null;
+    connectedClients?: LanConnectedClient[];
   };
   remoteReachable: boolean;
   discoveredServers?: LanDiscoveredServer[];
+};
+
+type LanConnectedClient = {
+  address: string;
+  port: number;
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+  disconnectedAt?: string;
+  connected?: boolean;
+  requests?: number;
+  lastRequestType?: string;
 };
 
 type LocalNetworkIp = {
@@ -56,7 +68,7 @@ export default function Ajustes() {
   const [discoveredServers, setDiscoveredServers] = useState<LanDiscoveredServer[]>([]);
   const [isSavingLanConfig, setIsSavingLanConfig] = useState(false);
 
-  const refreshLanState = useCallback(async () => {
+  const refreshLanState = useCallback(async (showErrors = false) => {
     try {
       const [config, status] = await Promise.all([
         window.database.getLanConfig(),
@@ -67,7 +79,9 @@ export default function Ajustes() {
       setDiscoveredServers(status.discoveredServers || []);
     } catch (error) {
       console.error(error);
-      alert("No fue posible consultar el estado LAN.");
+      if (showErrors) {
+        alert("No fue posible consultar el estado LAN.");
+      }
     }
   }, []);
 
@@ -89,11 +103,19 @@ export default function Ajustes() {
     void refreshLocalIps();
   }, [refreshLanState, refreshLocalIps]);
 
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void refreshLanState();
+    }, 5000);
+
+    return () => window.clearInterval(id);
+  }, [refreshLanState]);
+
   const handleSaveLanConfig = async () => {
     setIsSavingLanConfig(true);
     try {
       await window.database.setLanConfig(lanConfig);
-      await refreshLanState();
+      await refreshLanState(true);
       alert("Configuración LAN guardada correctamente.");
     } catch (error) {
       console.error(error);
@@ -141,6 +163,11 @@ export default function Ajustes() {
   };
 
   const serverIpSuggestion = localIps[0]?.address || "No detectada";
+  const serverConnectionAddress =
+    lanStatus?.serverStatus.host && lanStatus.serverStatus.host !== "0.0.0.0"
+      ? lanStatus.serverStatus.host
+      : serverIpSuggestion;
+  const connectedClients = lanStatus?.serverStatus.connectedClients || [];
 
   if (!isAdmin) {
     return <Navigate to="/" replace />;
@@ -160,7 +187,7 @@ export default function Ajustes() {
             Configuración Cliente-Servidor
           </h3>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            En modo cliente no se pueden crear órdenes si no hay conexión con el servidor LAN.
+            Configura una sola PC como servidor y conecta los demás equipos como clientes usando la IP del servidor.
           </p>
         </div>
 
@@ -169,9 +196,19 @@ export default function Ajustes() {
             <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Modo</label>
             <select
               value={lanConfig.mode}
-              onChange={(e) =>
-                setLanConfig((prev) => ({ ...prev, mode: e.target.value as LanMode }))
-              }
+              onChange={(e) => {
+                const nextMode = e.target.value as LanMode;
+                setLanConfig((prev) => ({
+                  ...prev,
+                  mode: nextMode,
+                  host:
+                    nextMode === "server"
+                      ? "0.0.0.0"
+                      : nextMode === "standalone"
+                        ? "127.0.0.1"
+                        : prev.host,
+                }));
+              }}
               className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:text-white"
             >
               <option value="standalone">Standalone</option>
@@ -181,18 +218,23 @@ export default function Ajustes() {
           </div>
 
           <div className="sm:col-span-2">
-            <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Host del servidor</label>
+            <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
+              {lanConfig.mode === "client" ? "IP del servidor" : "Host de escucha"}
+            </label>
             <input
               type="text"
               value={lanConfig.host}
               onChange={(e) =>
                 setLanConfig((prev) => ({ ...prev, host: e.target.value }))
               }
-              placeholder={lanConfig.mode === "client" ? "Detectar automáticamente" : "0.0.0.0"}
+              placeholder={lanConfig.mode === "client" ? "Ejemplo: 192.168.1.50" : "0.0.0.0"}
+              disabled={lanConfig.mode === "server"}
               className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:text-white"
             />
             <p className="mt-1 text-xxs text-gray-500 dark:text-gray-400">
-              El puerto es automático (4510). No necesitas cambiarlo.
+              {lanConfig.mode === "server"
+                ? "En servidor se usa 0.0.0.0 para aceptar conexiones de toda la red local."
+                : "Solo debes colocar la IP del servidor. El puerto 4510 se maneja automáticamente."}
             </p>
           </div>
 
@@ -281,9 +323,7 @@ export default function Ajustes() {
                     <p className="font-semibold text-gray-800 dark:text-gray-100">
                       {ip.address} ({ip.interfaceName})
                     </p>
-                    <p className="text-gray-500 dark:text-gray-400">
-                      {ip.family} | Mascara: {ip.netmask || "N/D"}
-                    </p>
+                    <p className="text-gray-500 dark:text-gray-400">{ip.family}</p>
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -312,14 +352,69 @@ export default function Ajustes() {
           </div>
         </div>
 
+        {lanConfig.mode === "server" && (
+          <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/30 dark:bg-emerald-950/20">
+            <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">Datos para conectar clientes</p>
+            <p className="mt-1 text-xs text-emerald-900/90 dark:text-emerald-100/90">
+              En cada cliente, coloca esta IP del servidor en el campo "IP del servidor".
+            </p>
+            <div className="mt-3 flex flex-col gap-2 rounded-lg border border-emerald-200 bg-white p-3 dark:border-emerald-800 dark:bg-emerald-950/30 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs text-emerald-800 dark:text-emerald-200">IP del servidor</p>
+                <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+                  {serverConnectionAddress}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCopyServerIp(serverConnectionAddress)}
+                className="rounded-lg border border-emerald-300 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:text-emerald-200 dark:hover:bg-emerald-900/40"
+              >
+                Copiar IP del servidor
+              </button>
+            </div>
+
+            <div className="mt-4">
+              <p className="text-xs font-medium text-emerald-900 dark:text-emerald-100">
+                Clientes detectados en este servidor ({connectedClients.length})
+              </p>
+              {connectedClients.length === 0 ? (
+                <p className="mt-2 text-xs text-emerald-900/90 dark:text-emerald-100/90">
+                  Todavía no hay clientes conectados.
+                </p>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {connectedClients.map((client) => (
+                    <div
+                      key={`${client.address}:${client.port}`}
+                      className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs dark:border-emerald-800 dark:bg-emerald-950/30"
+                    >
+                      <p className="font-semibold text-emerald-900 dark:text-emerald-100">
+                        {client.address}:{client.port}
+                      </p>
+                      <p className="mt-0.5 text-emerald-900/90 dark:text-emerald-100/90">
+                        {client.connected ? "Conectado" : "Desconectado"} | Solicitudes: {client.requests || 0}
+                      </p>
+                      {client.lastSeenAt ? (
+                        <p className="mt-0.5 text-emerald-900/80 dark:text-emerald-100/80">
+                          Última actividad: {new Date(client.lastSeenAt).toLocaleString()}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/30 dark:bg-blue-950/20">
           <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">Guia rápida para definir Servidor y Clientes</p>
           <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-blue-900/90 dark:text-blue-100/90">
             <li>Elige una sola computadora como servidor (la más estable y siempre encendida).</li>
             <li>En esa computadora, selecciona modo Servidor y guarda la configuración.</li>
-            <li>Guarda configuración y verifica que el estado diga "Servidor activo".</li>
-            <li>Comparte esta IP del servidor con los demás equipos: {serverIpSuggestion}.</li>
-            <li>En cada cliente, selecciona modo Cliente y pulsa "Buscar servidor en red".</li>
+            <li>Verifica que aparezca "Servidor activo" y comparte la IP mostrada en "Datos para conectar clientes".</li>
+            <li>En cada cliente, selecciona modo Cliente y escribe esa IP (o usa "Buscar servidor en red").</li>
             <li>Guarda en cliente cuando detecte el servidor. El puerto se maneja automáticamente.</li>
             <li>Usa token solo si deseas restringir conexiones (opcional).</li>
           </ol>
@@ -333,11 +428,11 @@ export default function Ajustes() {
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             {lanStatus?.config.mode === "client"
               ? lanStatus?.remoteReachable
-                ? "Cliente conectado al servidor LAN."
-                : "Cliente sin conexión al servidor LAN."
+                ? `Cliente conectado al servidor ${lanStatus?.config.host || "(IP no definida)"}.`
+                : "Cliente sin conexión al servidor LAN. Verifica la IP del servidor."
               : lanStatus?.config.mode === "server"
                 ? lanStatus?.serverStatus.running
-                  ? `Servidor activo en ${lanStatus.serverStatus.host}:${lanStatus.serverStatus.port}`
+                  ? `Servidor activo en ${serverConnectionAddress}:${lanStatus.serverStatus.port || 4510}`
                   : "Servidor detenido."
                 : "Operación local sin red LAN."}
           </p>
@@ -347,7 +442,7 @@ export default function Ajustes() {
           <button
             type="button"
             onClick={() => {
-              void refreshLanState();
+              void refreshLanState(true);
               void refreshLocalIps();
             }}
             className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"

@@ -5,6 +5,7 @@ import { orderCodeRepo, ordersRepo } from "./db.js";
 let tcpServer = null;
 let tcpServerConfig = null;
 let discoveryServer = null;
+const connectedClients = new Map();
 
 const DEFAULT_DISCOVERY_PORT = 4511;
 const DISCOVERY_REQUEST_TYPE = "rectificadora:discover";
@@ -24,6 +25,85 @@ function ensureAuthorized(requestToken, expectedToken) {
 
 function writeResponse(socket, id, payload) {
   socket.write(`${JSON.stringify({ id, ...payload })}\n`);
+}
+
+function normalizeRemoteAddress(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("::ffff:")) {
+    return raw.slice(7);
+  }
+  if (raw === "::1") {
+    return "127.0.0.1";
+  }
+  return raw;
+}
+
+function buildClientKey(address, port) {
+  return `${address}:${String(port || "")}`;
+}
+
+function updateClientSnapshot(socket, update = {}) {
+  const address = normalizeRemoteAddress(socket?.remoteAddress);
+  const port = Number(socket?.remotePort || 0);
+  if (!address || !port) return;
+
+  const key = buildClientKey(address, port);
+  const previous = connectedClients.get(key) || {
+    address,
+    port,
+    firstSeenAt: new Date().toISOString(),
+    requests: 0,
+  };
+
+  connectedClients.set(key, {
+    ...previous,
+    ...update,
+    address,
+    port,
+    connected: true,
+    lastSeenAt: new Date().toISOString(),
+  });
+}
+
+function incrementClientRequestCount(socket, requestType) {
+  const address = normalizeRemoteAddress(socket?.remoteAddress);
+  const port = Number(socket?.remotePort || 0);
+  if (!address || !port) return;
+
+  const key = buildClientKey(address, port);
+  const previous = connectedClients.get(key);
+  const currentRequests = Number(previous?.requests || 0);
+  updateClientSnapshot(socket, {
+    requests: currentRequests + 1,
+    lastRequestType: String(requestType || ""),
+  });
+}
+
+function markClientDisconnected(socket) {
+  const address = normalizeRemoteAddress(socket?.remoteAddress);
+  const port = Number(socket?.remotePort || 0);
+  if (!address || !port) return;
+
+  const key = buildClientKey(address, port);
+  const previous = connectedClients.get(key);
+  if (!previous) return;
+
+  connectedClients.set(key, {
+    ...previous,
+    connected: false,
+    disconnectedAt: new Date().toISOString(),
+  });
+}
+
+function getConnectedClientList() {
+  return Array.from(connectedClients.values())
+    .sort((a, b) => {
+      const aTime = Date.parse(a.lastSeenAt || a.firstSeenAt || "") || 0;
+      const bTime = Date.parse(b.lastSeenAt || b.firstSeenAt || "") || 0;
+      return bTime - aTime;
+    })
+    .slice(0, 30);
 }
 
 async function handleServerRequest(request, expectedToken) {
@@ -75,11 +155,15 @@ export function startLanOrderServer(config) {
     stopLanOrderServer();
   }
 
+  connectedClients.clear();
+
   tcpServer = net.createServer((socket) => {
     let buffer = "";
+    updateClientSnapshot(socket);
 
     socket.setEncoding("utf8");
     socket.on("data", async (chunk) => {
+      updateClientSnapshot(socket);
       buffer += chunk;
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
@@ -89,6 +173,7 @@ export function startLanOrderServer(config) {
 
         try {
           const request = JSON.parse(line);
+          incrementClientRequestCount(socket, request?.type);
           const response = await handleServerRequest(request, token);
           writeResponse(socket, response.id || request?.id || null, response);
         } catch (error) {
@@ -98,6 +183,14 @@ export function startLanOrderServer(config) {
           });
         }
       }
+    });
+
+    socket.on("close", () => {
+      markClientDisconnected(socket);
+    });
+
+    socket.on("error", () => {
+      markClientDisconnected(socket);
     });
   });
 
@@ -133,6 +226,7 @@ export function startLanOrderServer(config) {
 export function stopLanOrderServer() {
   if (!tcpServer) {
     tcpServerConfig = null;
+    connectedClients.clear();
     return { running: false };
   }
 
@@ -143,6 +237,7 @@ export function stopLanOrderServer() {
   }
   tcpServer = null;
   tcpServerConfig = null;
+  connectedClients.clear();
   return { running: false };
 }
 
@@ -151,6 +246,7 @@ export function getLanOrderServerStatus() {
     running: Boolean(tcpServer),
     host: tcpServerConfig?.host || null,
     port: tcpServerConfig?.port || null,
+    connectedClients: getConnectedClientList(),
   };
 }
 

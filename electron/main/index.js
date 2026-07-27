@@ -1,3 +1,4 @@
+import "./runtime-env.js";
 import { app, BrowserWindow, net, protocol, ipcMain } from "electron";
 import fs from "node:fs";
 import os from "node:os";

@@ -43,13 +43,18 @@ const AuthUnavailableScreen = () => (
   </div>
 );
 
-const LicenseBlockedScreen = ({ license }: { license: LicenseStatusPayload }) => (
-  <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-900">
-    <div className="w-full max-w-xl rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm dark:border-red-900/50 dark:bg-gray-900">
-      <h1 className="text-2xl font-semibold text-red-700 dark:text-red-400">Licencia Bloqueada</h1>
-      <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
-        El periodo de uso vencio y la aplicacion se encuentra bloqueada hasta registrar un nuevo pago.
-      </p>
+const LicenseBlockedScreen = ({ license }: { license: LicenseStatusPayload }) => {
+  const isTrialExpired = license.reason === "trial-expired-missing-license";
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-900">
+      <div className="w-full max-w-xl rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm dark:border-red-900/50 dark:bg-gray-900">
+        <h1 className="text-2xl font-semibold text-red-700 dark:text-red-400">Licencia Bloqueada</h1>
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+          {isTrialExpired
+            ? "El periodo de prueba finalizo y la aplicacion se encuentra bloqueada hasta registrar una licencia valida."
+            : "El periodo de uso vencio y la aplicacion se encuentra bloqueada hasta registrar un nuevo pago."}
+        </p>
       <div className="mt-6 rounded-xl bg-red-50 p-4 text-left text-sm text-red-800 dark:bg-red-950/30 dark:text-red-200">
         <p>
           <strong>Instalacion:</strong> {license.installationId}
@@ -68,20 +73,27 @@ const LicenseBlockedScreen = ({ license }: { license: LicenseStatusPayload }) =>
       </p>
     </div>
   </div>
-);
+  );
+};
 
-const LicenseWarningBanner = ({ license }: { license: LicenseStatusPayload }) => (
-  <div className="fixed left-1/2 top-4 z-[1200] w-[min(92vw,920px)] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-lg dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-      <p className="font-medium">
-        Aviso de licencia: restan {license.daysUntilBlock} dia(s) para el bloqueo automatico por pago pendiente.
-      </p>
-      <p className="text-xs opacity-90">
-        Corte: {license.blockAt || "No disponible"} | Instalacion: {license.installationId}
-      </p>
+const LicenseWarningBanner = ({ license }: { license: LicenseStatusPayload }) => {
+  const isTrial = license.reason === "trial-active-missing-license";
+
+  return (
+    <div className="fixed left-1/2 top-20 z-[100000] w-[min(92vw,920px)] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-lg dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200 lg:top-24">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <p className="font-medium">
+          {isTrial
+            ? `Modo prueba activo: restan ${license.daysUntilBlock} dia(s) para el bloqueo automatico.`
+            : `Aviso de licencia: restan ${license.daysUntilBlock} dia(s) para el bloqueo automatico por pago pendiente.`}
+        </p>
+        <p className="text-xs opacity-90">
+          Corte: {license.blockAt || "No disponible"} | Instalacion: {license.installationId}
+        </p>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const RequireAuth = ({ children }: { children: ReactNode }) => {
   const { user, isLoading, isDesktopAuthAvailable, requiresMasterSetup } =

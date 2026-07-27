@@ -90,9 +90,21 @@ type LanStatus = {
     running: boolean;
     host: string | null;
     port: number | null;
+    connectedClients?: LanConnectedClient[];
   };
   remoteReachable: boolean;
   discoveredServers?: LanDiscoveredServer[];
+};
+
+type LanConnectedClient = {
+  address: string;
+  port: number;
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+  disconnectedAt?: string;
+  connected?: boolean;
+  requests?: number;
+  lastRequestType?: string;
 };
 
 type LanDiscoveredServer = {

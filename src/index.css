@@ -255,26 +255,25 @@ layer(base);
 @utility menu-dropdown-badge-inactive {
   @apply bg-brand-50 group-hover:bg-brand-100 dark:bg-brand-500/15 dark:group-hover:bg-brand-500/20;
 }
-@utility no-scrollbar {
-  /* Chrome, Safari and Opera */
-  &::-webkit-scrollbar {
-    display: none;
-  }
+.no-scrollbar {
   -ms-overflow-style: none; /* IE and Edge */
   scrollbar-width: none; /* Firefox */
 }
-@utility custom-scrollbar {
-  &::-webkit-scrollbar {
-    @apply size-1.5;
-  }
 
-  &::-webkit-scrollbar-track {
-    @apply rounded-full;
-  }
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
 
-  &::-webkit-scrollbar-thumb {
-    @apply bg-gray-200 rounded-full dark:bg-gray-700;
-  }
+.custom-scrollbar::-webkit-scrollbar {
+  @apply size-1.5;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  @apply rounded-full;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-gray-200 rounded-full;
 }
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
   background-color: #344054;
@@ -556,7 +555,24 @@ span.flatpickr-weekday,
 }
 
 .fc .fc-view-harness {
-  @apply max-w-full overflow-x-auto custom-scrollbar;
+  @apply max-w-full overflow-x-auto;
+  scrollbar-width: thin;
+}
+
+.fc .fc-view-harness::-webkit-scrollbar {
+  @apply size-1.5;
+}
+
+.fc .fc-view-harness::-webkit-scrollbar-track {
+  @apply rounded-full;
+}
+
+.fc .fc-view-harness::-webkit-scrollbar-thumb {
+  @apply bg-gray-200 rounded-full;
+}
+
+.dark .fc .fc-view-harness::-webkit-scrollbar-thumb {
+  background-color: #344054;
 }
 .fc-dayGridMonth-view.fc-view.fc-daygrid {
   @apply min-w-[718px];
@@ -780,13 +796,13 @@ span.flatpickr-weekday,
 }
 
 .simplebar-scrollbar::before {
-  @apply !bg-gray-200 !rounded-full dark:!bg-gray-700 !opacity-100;
+  @apply !bg-gray-200 !rounded-full !opacity-100;
 }
 
 .dark .simplebar-scrollbar::before {
   @apply !bg-gray-700;
 }
 
-.simplebar-scrollbar.simplebar-visible:before {
+.simplebar-scrollbar.simplebar-visible::before {
   @apply opacity-100;
 }

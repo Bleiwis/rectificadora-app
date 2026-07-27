@@ -1,3 +1,4 @@
+import "./runtime-env.js";
 import { createPublicKey, randomUUID, verify as verifySignature } from "node:crypto";
 import { getDb } from "./db.js";
 
@@ -6,6 +7,8 @@ const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const LICENSE_TABLE = process.env.LICENSE_TABLE || "app_licenses";
 const LICENSE_PUBLIC_KEY = process.env.LICENSE_PUBLIC_KEY || "";
+const LICENSE_TRIAL_DAYS = Math.max(0, Number.parseInt(process.env.LICENSE_TRIAL_DAYS || "3", 10) || 3);
+const DAY_MS = 24 * 60 * 60 * 1000;
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const LICENSE_ENFORCEMENT =
   process.env.LICENSE_ENFORCEMENT === "true"
@@ -15,6 +18,14 @@ const LICENSE_ENFORCEMENT =
       : !isDevelopment;
 
 let refreshIntervalId = null;
+
+function ensureColumnExists(db, tableName, columnName, columnDefinition) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  const hasColumn = columns.some((column) => column.name === columnName);
+  if (!hasColumn) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+  }
+}
 
 function ensureSchema() {
   const db = getDb();
@@ -26,11 +37,14 @@ function ensureSchema() {
       licenseSignature TEXT,
       lastServerTimeMs INTEGER NOT NULL DEFAULT 0,
       maxSeenTimeMs INTEGER NOT NULL DEFAULT 0,
+      trialStartedAtMs INTEGER NOT NULL DEFAULT 0,
       lastSyncAt TEXT,
       lastError TEXT,
       updatedAt TEXT NOT NULL
     );
   `);
+
+  ensureColumnExists(db, "license_state", "trialStartedAtMs", "INTEGER NOT NULL DEFAULT 0");
 
   const row = db.prepare("SELECT id FROM license_state WHERE id = 1").get();
   if (!row) {
@@ -38,9 +52,9 @@ function ensureSchema() {
     db.prepare(`
       INSERT INTO license_state (
         id, installationId, licensePayload, licenseSignature, lastServerTimeMs,
-        maxSeenTimeMs, lastSyncAt, lastError, updatedAt
-      ) VALUES (1, ?, NULL, NULL, 0, ?, NULL, NULL, ?)
-    `).run(`inst_${randomUUID()}`, now, new Date(now).toISOString());
+        maxSeenTimeMs, trialStartedAtMs, lastSyncAt, lastError, updatedAt
+      ) VALUES (1, ?, NULL, NULL, 0, ?, ?, NULL, NULL, ?)
+    `).run(`inst_${randomUUID()}`, now, now, new Date(now).toISOString());
   }
 }
 
@@ -64,6 +78,7 @@ function updateState(partial) {
         licenseSignature = ?,
         lastServerTimeMs = ?,
         maxSeenTimeMs = ?,
+      trialStartedAtMs = ?,
         lastSyncAt = ?,
         lastError = ?,
         updatedAt = ?
@@ -74,10 +89,30 @@ function updateState(partial) {
     next.licenseSignature,
     Number(next.lastServerTimeMs || 0),
     Number(next.maxSeenTimeMs || 0),
+    Number(next.trialStartedAtMs || 0),
     next.lastSyncAt || null,
     next.lastError || null,
     next.updatedAt,
   );
+}
+
+function getTrialWindow(state, effectiveNowMs) {
+  if (LICENSE_TRIAL_DAYS <= 0) {
+    return null;
+  }
+
+  const persistedStartMs = Number(state.trialStartedAtMs || 0);
+  const trialStartMs = persistedStartMs > 0 ? persistedStartMs : effectiveNowMs;
+
+  if (persistedStartMs !== trialStartMs) {
+    updateState({ trialStartedAtMs: trialStartMs });
+  }
+
+  const trialBlockAtMs = trialStartMs + LICENSE_TRIAL_DAYS * DAY_MS;
+  return {
+    trialStartMs,
+    trialBlockAtMs,
+  };
 }
 
 function parseLicensePayload(rawPayload) {
@@ -170,17 +205,41 @@ function buildLicenseStatus() {
   }
 
   if (!payload) {
+    const trialWindow = getTrialWindow(state, effectiveNowMs);
+    if (trialWindow && effectiveNowMs < trialWindow.trialBlockAtMs) {
+      const daysUntilBlock = Math.max(
+        0,
+        Math.ceil((trialWindow.trialBlockAtMs - effectiveNowMs) / DAY_MS),
+      );
+
+      return {
+        status: "warning",
+        reason: "trial-active-missing-license",
+        installationId: state.installationId,
+        nowIso: new Date(effectiveNowMs).toISOString(),
+        warningStartAt: new Date(trialWindow.trialStartMs).toISOString(),
+        blockAt: new Date(trialWindow.trialBlockAtMs).toISOString(),
+        daysUntilBlock,
+        periodLabel: `Trial ${LICENSE_TRIAL_DAYS} dias`,
+        lastSyncAt: state.lastSyncAt || null,
+        lastError: state.lastError || null,
+        insecureMode: !LICENSE_PUBLIC_KEY,
+      };
+    }
+
     return {
       status: "blocked",
-      reason: "missing-license",
+      reason: "trial-expired-missing-license",
       installationId: state.installationId,
       nowIso: new Date(effectiveNowMs).toISOString(),
-      warningStartAt: null,
-      blockAt: null,
+      warningStartAt: trialWindow ? new Date(trialWindow.trialStartMs).toISOString() : null,
+      blockAt: trialWindow ? new Date(trialWindow.trialBlockAtMs).toISOString() : null,
       daysUntilBlock: 0,
-      periodLabel: null,
+      periodLabel: trialWindow ? `Trial ${LICENSE_TRIAL_DAYS} dias` : null,
       lastSyncAt: state.lastSyncAt || null,
-      lastError: state.lastError || "Sin licencia local registrada.",
+      lastError:
+        state.lastError ||
+        `No existe licencia remota para installation_id=${state.installationId}`,
       insecureMode: !LICENSE_PUBLIC_KEY,
     };
   }
