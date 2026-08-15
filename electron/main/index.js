@@ -91,6 +91,20 @@ function formatMoney(value) {
   return amount.toFixed(2);
 }
 
+function assertObjectPayload(value, message) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(message);
+  }
+  return value;
+}
+
+function assertNonEmptyString(value, message) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(message);
+  }
+  return value.trim();
+}
+
 let orderNoteLogoDataUrl = null;
 
 function resolveOrderNoteLogoDataUrl() {
@@ -804,8 +818,14 @@ function registerDbIpcHandlers(authStore = null) {
     }
     return servicesRepo.getAll();
   });
-  ipcMain.handle("db:save-service", (_, service) => servicesRepo.save(service));
-  ipcMain.handle("db:delete-service", (_, id) => servicesRepo.delete(id));
+  ipcMain.handle("db:save-service", (_, service) => {
+    const payload = assertObjectPayload(service, "Payload de servicio inválido.");
+    return servicesRepo.save(payload);
+  });
+  ipcMain.handle("db:delete-service", (_, id) => {
+    const serviceId = assertNonEmptyString(id, "ID de servicio inválido.");
+    return servicesRepo.delete(serviceId);
+  });
 
   ipcMain.handle("db:get-inventory", async () => {
     const config = getEffectiveLanConfig();
@@ -815,8 +835,14 @@ function registerDbIpcHandlers(authStore = null) {
     }
     return inventoryRepo.getAll();
   });
-  ipcMain.handle("db:save-inventory", (_, item) => inventoryRepo.save(item));
-  ipcMain.handle("db:delete-inventory", (_, id) => inventoryRepo.delete(id));
+  ipcMain.handle("db:save-inventory", (_, item) => {
+    const payload = assertObjectPayload(item, "Payload de inventario inválido.");
+    return inventoryRepo.save(payload);
+  });
+  ipcMain.handle("db:delete-inventory", (_, id) => {
+    const inventoryId = assertNonEmptyString(id, "ID de inventario inválido.");
+    return inventoryRepo.delete(inventoryId);
+  });
 
   ipcMain.handle("db:get-orders", async () => {
     const config = getEffectiveLanConfig();
@@ -842,36 +868,57 @@ function registerDbIpcHandlers(authStore = null) {
     return orderCodeRepo.reserveNextCode();
   });
   ipcMain.handle("db:create-order-with-inventory", async (_, order) => {
+    const payload = assertObjectPayload(order, "Payload de orden inválido.");
     const config = getEffectiveLanConfig();
     if (config.mode === "client") {
       const resolvedConfig = await resolveClientLanConfig(config);
-      return createOrderThroughLan(resolvedConfig, order);
+      return createOrderThroughLan(resolvedConfig, payload);
     }
-    return ordersRepo.createWithInventoryDeduction(order);
+    return ordersRepo.createWithInventoryDeduction(payload);
   });
-  ipcMain.handle("db:save-order", (_, order) => ordersRepo.save(order));
-  ipcMain.handle("db:delete-order", (_, id) => ordersRepo.delete(id));
+  ipcMain.handle("db:save-order", (_, order) => {
+    const payload = assertObjectPayload(order, "Payload de orden inválido.");
+    return ordersRepo.save(payload);
+  });
+  ipcMain.handle("db:delete-order", (_, id) => {
+    const orderId = assertNonEmptyString(id, "ID de orden inválido.");
+    return ordersRepo.delete(orderId);
+  });
   ipcMain.handle("db:cancel-order", (_, payload) =>
-    ordersRepo.cancel(payload?.id, payload),
+    ordersRepo.cancel(
+      assertNonEmptyString(payload?.id, "ID de orden inválido."),
+      assertObjectPayload(payload, "Payload de cancelación inválido."),
+    ),
   );
   ipcMain.handle("db:get-order-payments", (_, orderId) =>
     orderPaymentsRepo.getByOrderId(orderId),
   );
-  ipcMain.handle("db:add-order-payment", (_, payload) =>
-    orderPaymentsRepo.addPayment(payload?.orderId, payload?.payment),
-  );
+  ipcMain.handle("db:add-order-payment", (_, payload) => {
+    const data = assertObjectPayload(payload, "Payload de pago inválido.");
+    const orderId = assertNonEmptyString(data.orderId, "ID de orden inválido para pago.");
+    const payment = assertObjectPayload(data.payment, "Detalle de pago inválido.");
+    return orderPaymentsRepo.addPayment(orderId, payment);
+  });
   ipcMain.handle("db:get-order-part-deliveries", (_, orderId) =>
     orderPartDeliveriesRepo.getByOrderId(orderId),
   );
-  ipcMain.handle("db:add-order-part-deliveries", (_, payload) =>
-    orderPartDeliveriesRepo.addDeliveries(payload?.orderId, payload),
-  );
+  ipcMain.handle("db:add-order-part-deliveries", (_, payload) => {
+    const data = assertObjectPayload(payload, "Payload de retiro de partes inválido.");
+    const orderId = assertNonEmptyString(
+      data.orderId,
+      "ID de orden inválido para retiro de partes.",
+    );
+    return orderPartDeliveriesRepo.addDeliveries(orderId, data);
+  });
 
   ipcMain.handle("db:get-clients", () => clientsRepo.getAll());
   ipcMain.handle("db:find-client-by-document", (_, docNormalized) =>
     clientsRepo.findByDocument(docNormalized),
   );
-  ipcMain.handle("db:upsert-client", (_, client) => clientsRepo.upsert(client));
+  ipcMain.handle("db:upsert-client", (_, client) => {
+    const payload = assertObjectPayload(client, "Payload de cliente inválido.");
+    return clientsRepo.upsert(payload);
+  });
 
   ipcMain.handle("db:trigger-sync", () => {
     processOutbox();
@@ -887,14 +934,18 @@ function registerDbIpcHandlers(authStore = null) {
     refreshBcvUsdRateSafe({ force: true, reason: "manual" }),
   );
   ipcMain.handle("db:get-bcv-usd-rate-status", () => getBcvUsdRateStatus());
-  ipcMain.handle("db:set-manual-bcv-usd-rate", (_, valueUsd) =>
-    setManualBcvUsdRate(valueUsd),
-  );
+  ipcMain.handle("db:set-manual-bcv-usd-rate", (_, valueUsd) => {
+    if (!Number.isFinite(Number(valueUsd))) {
+      throw new Error("Tasa manual BCV inválida.");
+    }
+    return setManualBcvUsdRate(valueUsd);
+  });
 
   ipcMain.handle("db:get-lan-config", () => getEffectiveLanConfig());
   ipcMain.handle("db:set-lan-config", (_, input) => {
+    const payload = assertObjectPayload(input, "Payload de configuración LAN inválido.");
     const current = runtimeConfigRepo.getLanConfig();
-    const requestedMode = String(input?.mode || "").trim();
+    const requestedMode = String(payload?.mode || "").trim();
     if (
       current.modeLocked &&
       (requestedMode === "server" || requestedMode === "client" || requestedMode === "standalone") &&
@@ -906,7 +957,7 @@ function registerDbIpcHandlers(authStore = null) {
     }
 
     const next = runtimeConfigRepo.saveLanConfig({
-      ...(input || {}),
+      ...payload,
       modeLocked: current.modeLocked,
       installedRole: current.installedRole,
     });

@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 2,
+  "pack": "js-ts",
+  "sensors": {
+    "lint": {
+      "enabled": false,
+      "variantId": "eslint-9-flat",
+      "command": {
+        "executable": "eslint",
+        "resolution": "node-modules-bin",
+        "args": [
+          ".",
+          "--config",
+          "eslint.config.awm.mjs",
+          "--cache",
+          "--format",
+          "json"
+        ]
+      },
+      "initializedCompatibility": {
+        "state": "unverifiable",
+        "reason": "probe-inconclusive",
+        "variantId": "eslint-9-flat",
+        "toolVersion": "9.39.5",
+        "runtimeVersion": "24.18.0",
+        "certifiedRange": "=9.39.5",
+        "evidence": [
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "eslint.config.js"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package-lock.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "tsconfig.json"
+          },
+          {
+            "kind": "tool-version",
+            "status": "9.39.5"
+          },
+          {
+            "kind": "runtime-version",
+            "status": "24.18.0"
+          },
+          {
+            "kind": "probe",
+            "status": "unverifiable"
+          }
+        ]
+      },
+      "assets": [
+        "eslint.config.awm.mjs"
+      ],
+      "fast": true
+    },
+    "typecheck": {
+      "enabled": false,
+      "variantId": "typescript-native",
+      "command": {
+        "executable": "tsc",
+        "resolution": "node-modules-bin",
+        "args": [
+          "--noEmit"
+        ]
+      },
+      "initializedCompatibility": {
+        "state": "unverifiable",
+        "reason": "probe-inconclusive",
+        "variantId": "typescript-native",
+        "toolVersion": "5.9.3",
+        "runtimeVersion": "24.18.0",
+        "certifiedRange": "=5.9.3",
+        "evidence": [
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "eslint.config.js"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package-lock.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "tsconfig.json"
+          },
+          {
+            "kind": "tool-version",
+            "status": "5.9.3"
+          },
+          {
+            "kind": "runtime-version",
+            "status": "24.18.0"
+          },
+          {
+            "kind": "probe",
+            "status": "unverifiable"
+          }
+        ]
+      },
+      "assets": [],
+      "fast": true
+    }
+  },
+  "registryRoot": "C:\\Users\\PC\\.awm\\registries\\baseline"
+}

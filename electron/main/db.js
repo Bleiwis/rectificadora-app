@@ -201,7 +201,7 @@ export function initDatabase(dbPath) {
         fs.mkdirSync(userDataPath, { recursive: true });
       }
       finalPath = path.join(userDataPath, "rectificadora.db");
-    } catch (err) {
+    } catch (_err) {
       // Fallback for testing environment (Vitest)
       finalPath = path.join(process.cwd(), "rectificadora_test.db");
     }

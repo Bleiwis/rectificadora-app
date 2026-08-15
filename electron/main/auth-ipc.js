@@ -6,7 +6,6 @@ import {
   getBootstrapStateFromLan,
   setInitialPasswordFromLan,
   getUserByIdFromLan,
-  forceResetPasswordFromLan,
 } from "./lan-order-service.js";
 
 function toErrorMessage(error) {

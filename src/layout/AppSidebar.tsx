@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 
 // Assume these icons are imported from an icon library
@@ -59,19 +59,22 @@ const AppSidebar: React.FC = () => {
 
   const isAdmin = user?.role === "master" || user?.role === "administrador";
 
-  const filteredNavItems = [...navItems];
-  if (isAdmin) {
-    filteredNavItems.push({
-      icon: <UserIcon />,
-      name: "Usuarios",
-      path: "/usuarios",
-    });
-    filteredNavItems.push({
-      icon: <PlugInIcon />,
-      name: "Ajustes",
-      path: "/ajustes",
-    });
-  }
+  const filteredNavItems = useMemo(() => {
+    const items = [...navItems];
+    if (isAdmin) {
+      items.push({
+        icon: <UserIcon />,
+        name: "Usuarios",
+        path: "/usuarios",
+      });
+      items.push({
+        icon: <PlugInIcon />,
+        name: "Ajustes",
+        path: "/ajustes",
+      });
+    }
+    return items;
+  }, [isAdmin]);
 
   const [openSubmenu, setOpenSubmenu] = useState<{
     type: "main" | "others";
@@ -110,7 +113,7 @@ const AppSidebar: React.FC = () => {
     if (!submenuMatched) {
       setOpenSubmenu(null);
     }
-  }, [location, isActive]);
+  }, [filteredNavItems, isActive]);
 
   useEffect(() => {
     if (openSubmenu !== null) {
