@@ -56,6 +56,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         return;
       }
 
+      try {
+        const lanConfig = await window.database.getLanConfig();
+        const isLockedClientMode = Boolean(lanConfig?.modeLocked) && lanConfig?.mode === "client";
+        if (isLockedClientMode) {
+          setRequiresMasterSetup(false);
+          clearSessionUserId();
+          setUser(null);
+          setIsLoading(false);
+          return;
+        }
+      } catch {
+        // If LAN config cannot be read, continue with normal auth bootstrap.
+      }
+
       const bootstrapState = await desktopAuth.getBootstrapState();
       if (!bootstrapState.ok) {
         throw new Error(

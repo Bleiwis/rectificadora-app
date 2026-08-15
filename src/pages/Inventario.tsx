@@ -2,6 +2,13 @@ import React, { useState, useMemo } from "react";
 import PageBreadcrumb from "../components/common/PageBreadCrumb";
 import PageMeta from "../components/common/PageMeta";
 import { useAuth } from "../hooks/useAuth";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  inventoryFormSchema,
+  type InventoryFormInputValues,
+  type InventoryFormValues,
+} from "../validation/forms";
 
 interface InventoryItem {
   id: string;
@@ -48,15 +55,23 @@ export default function Inventario() {
   // Dynamic category state
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
-  
-  // Form State
-  const [formData, setFormData] = useState({
-    name: "",
-    category: "Aros",
-    priceUSD: "",
-    quantity: "",
-    minStock: "5",
-    description: "",
+
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    reset,
+    formState: { errors },
+  } = useForm<InventoryFormInputValues, unknown, InventoryFormValues>({
+    resolver: zodResolver(inventoryFormSchema),
+    defaultValues: {
+      name: "",
+      category: "Aros",
+      priceUSD: 0,
+      quantity: 0,
+      minStock: 5,
+      description: "",
+    },
   });
 
   // Filter & Search State
@@ -74,15 +89,6 @@ export default function Inventario() {
     setCurrentPage(1);
   }, [searchTerm, filterCategory, filterStockStatus, sortBy, itemsPerPage]);
 
-  const handleChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
-  ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
   const handleAddNewCategory = (e: React.MouseEvent) => {
     e.preventDefault();
     const trimmed = newCategoryName.trim();
@@ -91,23 +97,20 @@ export default function Inventario() {
     if (!categoriesList.includes(trimmed)) {
       setCategoriesList((prev) => [...prev, trimmed]);
     }
-    setFormData((prev) => ({ ...prev, category: trimmed }));
+    setValue("category", trimmed, { shouldDirty: true, shouldValidate: true });
     setNewCategoryName("");
     setIsAddingCategory(false);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.name || !formData.priceUSD || !formData.quantity) return;
-
+  const onSubmit = (values: InventoryFormValues) => {
     const itemData: InventoryItem = {
       id: editingId || Date.now().toString(),
-      name: formData.name,
-      category: formData.category,
-      priceUSD: parseFloat(formData.priceUSD),
-      quantity: parseInt(formData.quantity, 10),
-      minStock: parseInt(formData.minStock, 10),
-      description: formData.description,
+      name: values.name,
+      category: values.category,
+      priceUSD: Number(values.priceUSD),
+      quantity: Number(values.quantity),
+      minStock: Number(values.minStock),
+      description: values.description || "",
     };
 
     window.database.saveInventory(itemData)
@@ -120,12 +123,12 @@ export default function Inventario() {
 
   const handleEdit = (item: InventoryItem) => {
     setEditingId(item.id);
-    setFormData({
+    reset({
       name: item.name,
       category: item.category,
-      priceUSD: item.priceUSD.toString(),
-      quantity: item.quantity.toString(),
-      minStock: item.minStock.toString(),
+      priceUSD: item.priceUSD,
+      quantity: item.quantity,
+      minStock: item.minStock,
       description: item.description,
     });
     setIsModalOpen(true);
@@ -133,12 +136,12 @@ export default function Inventario() {
 
   const closeModal = () => {
     setEditingId(null);
-    setFormData({
+    reset({
       name: "",
       category: categoriesList[0] || "Otros",
-      priceUSD: "",
-      quantity: "",
-      minStock: "5",
+      priceUSD: 0,
+      quantity: 0,
+      minStock: 5,
       description: "",
     });
     setIsAddingCategory(false);
@@ -146,15 +149,22 @@ export default function Inventario() {
     setIsModalOpen(false);
   };
 
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
   const handleDelete = (id: string) => {
     if (editingId === id) {
       closeModal();
     }
-    if (window.confirm("¿Está seguro de que desea eliminar este artículo del inventario?")) {
-      window.database.deleteInventory(id)
-        .then(loadInventory)
-        .catch(console.error);
-    }
+    setDeleteConfirmId(id);
+  };
+
+  const confirmDeleteAction = (id: string) => {
+    window.database.deleteInventory(id)
+      .then(() => {
+        setDeleteConfirmId(null);
+        loadInventory();
+      })
+      .catch(console.error);
   };
 
   // Filtered & Sorted Inventory Data
@@ -501,20 +511,18 @@ export default function Inventario() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Nombre del Artículo
                 </label>
                 <input
                   type="text"
-                  name="name"
-                  value={formData.name}
-                  onChange={handleChange}
+                  {...register("name")}
                   placeholder="Ej. Juego de Aros Std Hilux"
-                  required
                   className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
                 />
+                {errors.name && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.name.message}</p>}
               </div>
 
               {/* Categoría con funcionalidad de agregado dinámico */}
@@ -525,9 +533,7 @@ export default function Inventario() {
                 {!isAddingCategory ? (
                   <div className="flex gap-2">
                     <select
-                      name="category"
-                      value={formData.category}
-                      onChange={handleChange}
+                      {...register("category")}
                       className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
                     >
                       {categoriesList.map((cat) => (
@@ -587,14 +593,12 @@ export default function Inventario() {
                   </label>
                   <input
                     type="number"
-                    name="quantity"
+                    {...register("quantity", { valueAsNumber: true })}
                     min="0"
-                    value={formData.quantity}
-                    onChange={handleChange}
                     placeholder="0"
-                    required
                     className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
                   />
+                  {errors.quantity && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.quantity.message}</p>}
                 </div>
                 <div>
                   <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -602,14 +606,12 @@ export default function Inventario() {
                   </label>
                   <input
                     type="number"
-                    name="minStock"
+                    {...register("minStock", { valueAsNumber: true })}
                     min="0"
-                    value={formData.minStock}
-                    onChange={handleChange}
                     placeholder="5"
-                    required
                     className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
                   />
+                  {errors.minStock && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.minStock.message}</p>}
                 </div>
               </div>
 
@@ -623,16 +625,14 @@ export default function Inventario() {
                   </span>
                   <input
                     type="number"
-                    name="priceUSD"
+                    {...register("priceUSD", { valueAsNumber: true })}
                     step="0.01"
                     min="0"
-                    value={formData.priceUSD}
-                    onChange={handleChange}
                     placeholder="0.00"
-                    required
                     className="w-full rounded-lg border border-gray-300 bg-transparent pl-8 pr-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
                   />
                 </div>
+                {errors.priceUSD && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.priceUSD.message}</p>}
               </div>
 
               <div>
@@ -640,13 +640,12 @@ export default function Inventario() {
                   Descripción
                 </label>
                 <textarea
-                  name="description"
-                  value={formData.description}
-                  onChange={handleChange}
+                  {...register("description")}
                   rows={3}
                   placeholder="Detalles sobre marca, medidas o compatibilidad..."
                   className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
                 />
+                {errors.description && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.description.message}</p>}
               </div>
 
               {/* Botones del Modal */}
@@ -666,6 +665,36 @@ export default function Inventario() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmación de Eliminación */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              ¿Eliminar artículo?
+            </h3>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+              Esta acción no se puede deshacer y eliminará permanentemente el producto del inventario local.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmId(null)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => confirmDeleteAction(deleteConfirmId)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                Sí, eliminar
+              </button>
+            </div>
           </div>
         </div>
       )}

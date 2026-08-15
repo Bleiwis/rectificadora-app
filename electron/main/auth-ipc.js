@@ -1,5 +1,13 @@
 import { ipcMain } from "electron";
 import { AUTH_CHANNELS } from "../shared/auth-channels.js";
+import {
+  signInFromLan,
+  checkUsernameFromLan,
+  getBootstrapStateFromLan,
+  setInitialPasswordFromLan,
+  getUserByIdFromLan,
+  forceResetPasswordFromLan,
+} from "./lan-order-service.js";
 
 function toErrorMessage(error) {
   if (error instanceof Error) {
@@ -9,7 +17,9 @@ function toErrorMessage(error) {
   return "Ha ocurrido un error inesperado.";
 }
 
-export function registerAuthIpcHandlers(authStore, onUserChanged) {
+export function registerAuthIpcHandlers(authStore, onUserChanged, options = {}) {
+  const getLanConfig = typeof options.getLanConfig === "function" ? options.getLanConfig : () => ({ mode: "standalone" });
+  const resolveClientLanConfig = typeof options.resolveClientLanConfig === "function" ? options.resolveClientLanConfig : async (cfg) => cfg;
   ipcMain.removeHandler(AUTH_CHANNELS.setupMasterUser);
   ipcMain.removeHandler(AUTH_CHANNELS.signIn);
   ipcMain.removeHandler(AUTH_CHANNELS.checkUsername);
@@ -41,6 +51,16 @@ export function registerAuthIpcHandlers(authStore, onUserChanged) {
 
   ipcMain.handle(AUTH_CHANNELS.signIn, async (_event, payload) => {
     try {
+      const config = getLanConfig();
+      if (config.mode === "client") {
+        const resolved = await resolveClientLanConfig(config);
+        const user = await signInFromLan(resolved, payload ?? {});
+        if (!user) {
+          return { ok: false, error: "Credenciales invalidas." };
+        }
+        mirrorUser(user);
+        return { ok: true, user };
+      }
       const user = authStore.signIn(payload ?? {});
       mirrorUser(user);
       return { ok: true, user };
@@ -54,6 +74,13 @@ export function registerAuthIpcHandlers(authStore, onUserChanged) {
       const username = payload?.username;
       if (typeof username !== "string" || !username.trim()) {
         return { ok: false, error: "Usuario invalido." };
+      }
+
+      const config = getLanConfig();
+      if (config.mode === "client") {
+        const resolved = await resolveClientLanConfig(config);
+        const status = await checkUsernameFromLan(resolved, username);
+        return { ok: true, ...status };
       }
 
       const status = authStore.getSignInState(username);
@@ -76,6 +103,17 @@ export function registerAuthIpcHandlers(authStore, onUserChanged) {
         return { ok: false, error: "Nueva clave invalida." };
       }
 
+      const config = getLanConfig();
+      if (config.mode === "client") {
+        const resolved = await resolveClientLanConfig(config);
+        const user = await setInitialPasswordFromLan(resolved, { username, newPassword });
+        if (!user) {
+          return { ok: false, error: "Error al establecer la clave inicial." };
+        }
+        mirrorUser(user);
+        return { ok: true, user };
+      }
+
       const user = authStore.setInitialPassword({ username, newPassword });
       mirrorUser(user);
       return { ok: true, user };
@@ -91,6 +129,16 @@ export function registerAuthIpcHandlers(authStore, onUserChanged) {
         return { ok: false, error: "Usuario invalido." };
       }
 
+      const config = getLanConfig();
+      if (config.mode === "client") {
+        const resolved = await resolveClientLanConfig(config);
+        const user = await getUserByIdFromLan(resolved, userId);
+        if (!user) {
+          return { ok: false, error: "Usuario no encontrado." };
+        }
+        return { ok: true, user };
+      }
+
       const user = authStore.getUserById(userId);
       if (!user) {
         return { ok: false, error: "Usuario no encontrado." };
@@ -104,6 +152,13 @@ export function registerAuthIpcHandlers(authStore, onUserChanged) {
 
   ipcMain.handle(AUTH_CHANNELS.getBootstrapState, async () => {
     try {
+      const config = getLanConfig();
+      if (config.mode === "client") {
+        const resolved = await resolveClientLanConfig(config);
+        const bootstrapState = await getBootstrapStateFromLan(resolved);
+        return { ok: true, ...bootstrapState };
+      }
+
       const bootstrapState = authStore.getBootstrapState();
       return { ok: true, ...bootstrapState };
     } catch (error) {

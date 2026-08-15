@@ -1,8 +1,13 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import PageBreadcrumb from "../components/common/PageBreadCrumb";
 import PageMeta from "../components/common/PageMeta";
 import { useAuth } from "../hooks/useAuth";
+import {
+  clientDataSchema,
+  orderCreationSchema,
+  partialPaymentSchema,
+} from "../validation/forms";
 
 type ClientDocumentType = "V" | "J";
 
@@ -85,6 +90,22 @@ interface LanStatusState {
 }
 
 const FALLBACK_BCV_RATE = 36.5;
+
+type RequiredFieldKey =
+  | "clientName"
+  | "clientLastName"
+  | "clientDocumentNumber"
+  | "clientPhone"
+  | "engineModel"
+  | "parts";
+
+const requiredFieldIds: Record<Exclude<RequiredFieldKey, "parts">, string> = {
+  clientName: "ingreso-client-name",
+  clientLastName: "ingreso-client-last-name",
+  clientDocumentNumber: "ingreso-client-document-number",
+  clientPhone: "ingreso-client-phone",
+  engineModel: "ingreso-engine-model",
+};
 
 export default function Ingreso() {
   const { user } = useAuth();
@@ -375,7 +396,142 @@ export default function Ingreso() {
     setSelectedInventoryItems((prev) => prev.filter((x) => x.id !== id));
   };
 
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<
+    Partial<Record<RequiredFieldKey, string>>
+  >({});
+
+  const clearFieldError = (field: RequiredFieldKey) => {
+    setFieldErrors((prev) => {
+      if (!prev[field]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const focusRequiredField = (field: RequiredFieldKey) => {
+    if (field === "parts") {
+      const firstPartInput = document.querySelector<HTMLInputElement>(
+        "input[data-part-name='true']",
+      );
+      if (firstPartInput) {
+        firstPartInput.scrollIntoView({ behavior: "smooth", block: "center" });
+        firstPartInput.focus();
+        return;
+      }
+      const addPartButton = document.getElementById("ingreso-add-part-btn");
+      if (addPartButton) {
+        addPartButton.scrollIntoView({ behavior: "smooth", block: "center" });
+        addPartButton.focus();
+      }
+      return;
+    }
+
+    const fieldId = requiredFieldIds[field];
+    const target = document.getElementById(fieldId);
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.focus();
+    }
+  };
+
+  const validateForm = (): boolean => {
+    setValidationError(null);
+    setFieldErrors({});
+    const clientCI = buildClientDocument();
+    const nextFieldErrors: Partial<Record<RequiredFieldKey, string>> = {};
+
+    const clientValidation = clientDataSchema.safeParse({
+      clientName,
+      clientLastName,
+      clientDocumentNumber: clientCI,
+      clientPhone,
+      engineModel,
+    });
+    if (!clientValidation.success) {
+      for (const issue of clientValidation.error.issues) {
+        const field = String(issue.path?.[0] || "") as RequiredFieldKey;
+        if (
+          (field === "clientName" ||
+            field === "clientLastName" ||
+            field === "clientDocumentNumber" ||
+            field === "clientPhone" ||
+            field === "engineModel") &&
+          !nextFieldErrors[field]
+        ) {
+          nextFieldErrors[field] = issue.message;
+        }
+      }
+
+      if (Object.keys(nextFieldErrors).length === 0) {
+        setValidationError(
+          clientValidation.error.issues[0]?.message ||
+            "Por favor rellene todos los campos obligatorios del cliente y modelo de motor.",
+        );
+      }
+    }
+
+    if (Object.keys(nextFieldErrors).length === 0) {
+      const normalizedParts = partsList
+        .map((part) => ({
+          partName: part.partName.trim(),
+          quantity: Number(part.quantity) || 1,
+          measurement: part.measurement.trim(),
+        }))
+        .filter((part) => part.partName.length > 0);
+
+      const totalUSD = calculateTotalUSD();
+
+      const orderValidation = orderCreationSchema.safeParse({
+        totalUSD,
+        parts: normalizedParts,
+      });
+      if (!orderValidation.success) {
+        const hasPartsIssue = orderValidation.error.issues.some(
+          (issue) => String(issue.path?.[0] || "") === "parts",
+        );
+
+        if (hasPartsIssue) {
+          nextFieldErrors.parts =
+            orderValidation.error.issues.find(
+              (issue) => String(issue.path?.[0] || "") === "parts",
+            )?.message || "Debes agregar al menos una parte del motor.";
+        } else {
+          setValidationError(
+            orderValidation.error.issues[0]?.message ||
+              "Debes validar los datos del pedido.",
+          );
+        }
+      }
+    }
+
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setFieldErrors(nextFieldErrors);
+      const focusOrder: RequiredFieldKey[] = [
+        "clientName",
+        "clientLastName",
+        "clientDocumentNumber",
+        "clientPhone",
+        "engineModel",
+        "parts",
+      ];
+      const firstInvalid = focusOrder.find((field) => nextFieldErrors[field]);
+      if (firstInvalid) {
+        focusRequiredField(firstInvalid);
+      }
+      return false;
+    }
+
+    return true;
+  };
+
   const openPaymentModal = () => {
+    if (!validateForm()) {
+      return;
+    }
     setShowPaymentModal(true);
     setPaymentModeSelection("full");
     setPaymentAmountInput("");
@@ -455,18 +611,11 @@ export default function Ingreso() {
     partialPaymentUsd?: number,
   ) => {
     e?.preventDefault();
-    const clientCI = buildClientDocument();
-    if (
-      !clientName ||
-      !clientLastName ||
-      !clientCI ||
-      !clientPhone ||
-      !engineModel
-    ) {
-      alert("Por favor rellene todos los campos obligatorios.");
+    if (!validateForm()) {
       return;
     }
 
+    const totalUSD = calculateTotalUSD();
     const normalizedParts = partsList
       .map((part) => ({
         partName: part.partName.trim(),
@@ -474,17 +623,6 @@ export default function Ingreso() {
         measurement: part.measurement.trim(),
       }))
       .filter((part) => part.partName.length > 0);
-
-    if (normalizedParts.length === 0) {
-      alert("Debes agregar al menos una parte del motor.");
-      return;
-    }
-
-    const totalUSD = calculateTotalUSD();
-    if (totalUSD <= 0) {
-      alert("El total del pedido debe ser mayor a cero.");
-      return;
-    }
 
     let paidUSD = 0;
     let initialPayment: OrderItem["initialPayment"];
@@ -499,16 +637,18 @@ export default function Ingreso() {
     }
 
     if (paymentMode === "partial") {
-      const amount = Number(partialPaymentUsd);
-
-      if (!Number.isFinite(amount) || amount <= 0) {
-        alert("Ingresa un monto de abono válido.");
+      const parsedAmount = partialPaymentSchema.safeParse({
+        amount: partialPaymentUsd,
+      });
+      if (!parsedAmount.success) {
+        setValidationError(parsedAmount.error.issues[0]?.message || "Ingresa un monto de abono válido.");
         return;
       }
 
+      const amount = Number(parsedAmount.data.amount);
       paidUSD = Number(amount.toFixed(2));
       if (paidUSD >= totalUSD) {
-        alert("El abono en USD debe ser menor al total. Usa 'Cobrar ahora' para pago completo.");
+        setValidationError("El abono en USD debe ser menor al total. Usa 'Cobrar ahora' para pago completo.");
         return;
       }
       initialPayment = {
@@ -517,7 +657,7 @@ export default function Ingreso() {
         note: "Abono inicial en divisas",
       };
       if (bcvRate <= 0) {
-        alert("No hay tasa BCV válida para mostrar referencia en bolívares.");
+        setValidationError("No hay tasa BCV válida para mostrar referencia en bolívares.");
         return;
       }
     }
@@ -536,7 +676,7 @@ export default function Ingreso() {
 
     try {
       if (lanStatus?.config.mode === "client" && !lanStatus.remoteReachable) {
-        alert(
+        setValidationError(
           "No hay conexión con el servidor LAN. En modo cliente no se pueden crear órdenes sin servidor.",
         );
         return;
@@ -622,12 +762,12 @@ export default function Ingreso() {
         })
         .catch((err) => {
           console.error(err);
-          alert("Error al guardar el pedido en la base de datos.");
+          setValidationError("Error al guardar el pedido en la base de datos.");
         });
     } catch (err) {
       console.error(err);
       const message = err instanceof Error ? err.message : "No fue posible registrar el cliente u orden.";
-      alert(message);
+      setValidationError(message);
     }
   };
 
@@ -645,11 +785,12 @@ export default function Ingreso() {
       return;
     }
 
-    const amount = Number(paymentAmountInput);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setPaymentModalError("Ingresa un monto de abono válido en USD.");
+    const parsedAmount = partialPaymentSchema.safeParse({ amount: paymentAmountInput });
+    if (!parsedAmount.success) {
+      setPaymentModalError(parsedAmount.error.issues[0]?.message || "Ingresa un monto de abono válido en USD.");
       return;
     }
+    const amount = Number(parsedAmount.data.amount);
 
     if (amount > totalUSD) {
       setPaymentModalError(
@@ -792,43 +933,32 @@ export default function Ingreso() {
         </div>
       )}
 
+      {validationError && (
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+          <div className="flex items-center gap-2">
+            <span>⚠️</span>
+            <span>{validationError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setValidationError(null)}
+            className="text-red-500 hover:text-red-700 dark:hover:text-red-300 font-bold ml-4"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <PageMeta
         title="Ingreso de Pedidos | Rectificadora App"
         description="Gestión de órdenes de entrada, presupuestos y notas de entrega imprimibles."
       />
       <PageBreadcrumb pageTitle="Ingreso de Pedidos" />
 
-      <div className="mb-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-gray-800 dark:text-white">
-              Modo LAN: {lanStatus?.config.mode || "standalone"}
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {lanStatus?.config.mode === "client"
-                ? lanStatus?.remoteReachable
-                  ? "Conectado al servidor de órdenes en red local."
-                  : "Sin conexión al servidor LAN. No se podrán crear órdenes en modo cliente."
-                : lanStatus?.config.mode === "server"
-                  ? lanStatus?.serverStatus.running
-                    ? `Servidor LAN activo en ${lanStatus.serverStatus.host}:${lanStatus.serverStatus.port}`
-                    : "Servidor LAN detenido."
-                  : "Operación local (sin coordinación LAN)."}
-            </p>
-          </div>
-            <Link
-              to="/ajustes"
-            className="rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-          >
-              Abrir Ajustes LAN
-            </Link>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         {/* Formulario de Registro (2/3) */}
         <div className="xl:col-span-2 space-y-6">
-          <form onSubmit={handleCreateOrder} className="space-y-6">
+          <form onSubmit={handleCreateOrder} noValidate className="space-y-6">
             {/* Tarjeta 1: Datos del Cliente */}
             <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03] sm:p-8">
               <div className="mb-6 flex justify-between items-center">
@@ -840,37 +970,63 @@ export default function Ingreso() {
                 </span>
               </div>
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
-                <div>
+                <div className="min-w-0">
                   <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Nombre <span className="text-red-500">*</span>
                   </label>
                   <input
+                    id="ingreso-client-name"
                     type="text"
                     value={clientName}
-                    onChange={(e) => setClientName(e.target.value)}
+                    onChange={(e) => {
+                      setClientName(e.target.value);
+                      clearFieldError("clientName");
+                    }}
                     placeholder="Juan"
-                    required
-                    className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
+                    aria-invalid={Boolean(fieldErrors.clientName)}
+                    className={`w-full min-w-0 rounded-lg border bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition dark:text-white ${
+                      fieldErrors.clientName
+                        ? "border-red-500 focus:border-red-500 dark:border-red-500"
+                        : "border-gray-300 focus:border-brand-500 dark:border-gray-700 dark:focus:border-brand-500"
+                    }`}
                   />
+                  {fieldErrors.clientName ? (
+                    <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">
+                      {fieldErrors.clientName}
+                    </p>
+                  ) : null}
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Apellido <span className="text-red-500">*</span>
                   </label>
                   <input
+                    id="ingreso-client-last-name"
                     type="text"
                     value={clientLastName}
-                    onChange={(e) => setClientLastName(e.target.value)}
+                    onChange={(e) => {
+                      setClientLastName(e.target.value);
+                      clearFieldError("clientLastName");
+                    }}
                     placeholder="Pérez"
-                    required
-                    className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
+                    aria-invalid={Boolean(fieldErrors.clientLastName)}
+                    className={`w-full min-w-0 rounded-lg border bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition dark:text-white ${
+                      fieldErrors.clientLastName
+                        ? "border-red-500 focus:border-red-500 dark:border-red-500"
+                        : "border-gray-300 focus:border-brand-500 dark:border-gray-700 dark:focus:border-brand-500"
+                    }`}
                   />
+                  {fieldErrors.clientLastName ? (
+                    <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">
+                      {fieldErrors.clientLastName}
+                    </p>
+                  ) : null}
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Cédula / RIF <span className="text-red-500">*</span>
                   </label>
-                  <div className="flex gap-2">
+                  <div className="flex gap-1.5">
                     <select
                       value={clientDocumentType}
                       onChange={(e) =>
@@ -878,26 +1034,39 @@ export default function Ingreso() {
                           e.target.value as ClientDocumentType,
                         )
                       }
-                      className="w-20 rounded-lg border border-gray-300 bg-transparent px-2 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                      className="w-16 shrink-0 rounded-lg border border-gray-300 bg-transparent px-2 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                     >
                       <option value="V">V</option>
                       <option value="J">J</option>
                     </select>
                     <input
+                      id="ingreso-client-document-number"
                       type="text"
                       inputMode="numeric"
                       pattern="[0-9]*"
                       value={clientDocumentNumber}
                       onChange={(e) =>
-                        setClientDocumentNumber(
-                          e.target.value.replace(/\D/g, ""),
-                        )
+                        {
+                          setClientDocumentNumber(
+                            e.target.value.replace(/\D/g, ""),
+                          );
+                          clearFieldError("clientDocumentNumber");
+                        }
                       }
                       placeholder="12345678"
-                      required
-                      className="flex-1 rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
+                      aria-invalid={Boolean(fieldErrors.clientDocumentNumber)}
+                      className={`w-full min-w-0 rounded-lg border bg-transparent px-3 py-2.5 text-sm text-gray-800 outline-none transition dark:text-white ${
+                        fieldErrors.clientDocumentNumber
+                          ? "border-red-500 focus:border-red-500 dark:border-red-500"
+                          : "border-gray-300 focus:border-brand-500 dark:border-gray-700 dark:focus:border-brand-500"
+                      }`}
                     />
                   </div>
+                  {fieldErrors.clientDocumentNumber ? (
+                    <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">
+                      {fieldErrors.clientDocumentNumber}
+                    </p>
+                  ) : null}
                   {recurrentClientNotice && (
                     <p className="mt-1 text-xs font-medium text-brand-600 dark:text-brand-400">
                       {recurrentClientNotice}
@@ -912,16 +1081,29 @@ export default function Ingreso() {
                     Teléfono <span className="text-red-500">*</span>
                   </label>
                   <input
+                    id="ingreso-client-phone"
                     type="text"
                     inputMode="numeric"
                     value={clientPhone}
                     onChange={(e) =>
-                      setClientPhone(normalizeDigitsOnly(e.target.value))
+                      {
+                        setClientPhone(normalizeDigitsOnly(e.target.value));
+                        clearFieldError("clientPhone");
+                      }
                     }
                     placeholder="0412-1234567"
-                    required
-                    className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
+                    aria-invalid={Boolean(fieldErrors.clientPhone)}
+                    className={`w-full rounded-lg border bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition dark:text-white ${
+                      fieldErrors.clientPhone
+                        ? "border-red-500 focus:border-red-500 dark:border-red-500"
+                        : "border-gray-300 focus:border-brand-500 dark:border-gray-700 dark:focus:border-brand-500"
+                    }`}
                   />
+                  {fieldErrors.clientPhone ? (
+                    <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">
+                      {fieldErrors.clientPhone}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="sm:col-span-2">
                   <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -995,13 +1177,26 @@ export default function Ingreso() {
                   Modelo del Motor <span className="text-red-500">*</span>
                 </label>
                 <input
+                  id="ingreso-engine-model"
                   type="text"
                   value={engineModel}
-                  onChange={(e) => setEngineModel(e.target.value)}
+                  onChange={(e) => {
+                    setEngineModel(e.target.value);
+                    clearFieldError("engineModel");
+                  }}
                   placeholder="Ej. Chevrolet C10 230 / Toyota 2.5 D4D"
-                  required
-                  className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
+                  aria-invalid={Boolean(fieldErrors.engineModel)}
+                  className={`w-full rounded-lg border bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition dark:text-white ${
+                    fieldErrors.engineModel
+                      ? "border-red-500 focus:border-red-500 dark:border-red-500"
+                      : "border-gray-300 focus:border-brand-500 dark:border-gray-700 dark:focus:border-brand-500"
+                  }`}
                 />
+                {fieldErrors.engineModel ? (
+                  <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">
+                    {fieldErrors.engineModel}
+                  </p>
+                ) : null}
               </div>
 
               {/* Grid Dinámico de Partes */}
@@ -1011,13 +1206,20 @@ export default function Ingreso() {
                     Partes del Motor Recibidas
                   </label>
                   <button
+                    id="ingreso-add-part-btn"
                     type="button"
                     onClick={handleAddPartRow}
-                    className="text-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+                    className="text-xs font-semibold text-brand-600 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-400 dark:text-brand-400 dark:hover:text-brand-300"
                   >
                     + Agregar Parte
                   </button>
                 </div>
+
+                {fieldErrors.parts ? (
+                  <p className="text-xs font-medium text-red-600 dark:text-red-400">
+                    {fieldErrors.parts}
+                  </p>
+                ) : null}
 
                 {partsList.length === 0 && (
                   <div className="rounded-xl border border-dashed border-gray-300 px-4 py-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
@@ -1035,6 +1237,7 @@ export default function Ingreso() {
                         Parte
                       </label>
                       <input
+                        data-part-name="true"
                         type="text"
                         value={row.partName}
                         onChange={(e) =>

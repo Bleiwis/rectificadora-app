@@ -239,7 +239,7 @@ function buildLicenseStatus() {
       lastSyncAt: state.lastSyncAt || null,
       lastError:
         state.lastError ||
-        `No existe licencia remota para installation_id=${state.installationId}`,
+        "No tiene licencia registrada para continuar usando la aplicación.",
       insecureMode: !LICENSE_PUBLIC_KEY,
     };
   }
@@ -316,7 +316,7 @@ async function fetchRemoteLicense(installationId) {
 
   const rows = await response.json();
   if (!Array.isArray(rows) || rows.length === 0) {
-    throw new Error(`No existe licencia remota para installation_id=${installationId}`);
+    throw new Error("No tiene licencia registrada para continuar usando la aplicación.");
   }
 
   return rows[0];

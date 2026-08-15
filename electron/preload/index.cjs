@@ -79,6 +79,7 @@ const DB_CHANNELS = {
   findClientByDocument: "db:find-client-by-document",
   upsertClient: "db:upsert-client",
   triggerSync: "db:trigger-sync",
+  restoreFromCloud: "db:restore-from-cloud",
   getBcvUsdRate: "db:get-bcv-usd-rate",
   refreshBcvUsdRate: "db:refresh-bcv-usd-rate",
   getBcvUsdRateStatus: "db:get-bcv-usd-rate-status",
@@ -89,6 +90,7 @@ const DB_CHANNELS = {
   discoverLanServers: "db:discover-lan-servers",
   probeLanServer: "db:probe-lan-server",
   getLocalNetworkIps: "db:get-local-network-ips",
+  printOrderNote: "db:print-order-note",
 };
 
 const LICENSE_CHANNELS = {
@@ -160,6 +162,9 @@ contextBridge.exposeInMainWorld("database", {
   triggerSync() {
     return ipcRenderer.invoke(DB_CHANNELS.triggerSync);
   },
+  restoreFromCloud(options) {
+    return ipcRenderer.invoke(DB_CHANNELS.restoreFromCloud, options || {});
+  },
   getBcvUsdRate() {
     return ipcRenderer.invoke(DB_CHANNELS.getBcvUsdRate);
   },
@@ -189,6 +194,9 @@ contextBridge.exposeInMainWorld("database", {
   },
   getLocalNetworkIps() {
     return ipcRenderer.invoke(DB_CHANNELS.getLocalNetworkIps);
+  },
+  printOrderNote(payload) {
+    return ipcRenderer.invoke(DB_CHANNELS.printOrderNote, payload);
   },
 });
 

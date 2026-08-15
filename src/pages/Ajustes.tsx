@@ -86,6 +86,8 @@ export default function Ajustes() {
     updatedAt: null,
   });
   const [isSavingLanConfig, setIsSavingLanConfig] = useState(false);
+  const [isRestoringCloud, setIsRestoringCloud] = useState(false);
+  const [restoreSummary, setRestoreSummary] = useState<CloudRestoreResult | null>(null);
 
   const refreshLanState = useCallback(async (showErrors = false) => {
     try {
@@ -141,6 +143,35 @@ export default function Ajustes() {
       alert("No fue posible guardar la configuración LAN.");
     } finally {
       setIsSavingLanConfig(false);
+    }
+  };
+
+  const handleRestoreFromCloud = async () => {
+    const accepted = window.confirm(
+      "Esto traerá información desde la nube y la combinará con los datos locales actuales. ¿Deseas continuar?",
+    );
+
+    if (!accepted) {
+      return;
+    }
+
+    setIsRestoringCloud(true);
+    try {
+      const result = await window.database.restoreFromCloud();
+      setRestoreSummary(result);
+      await refreshLanState();
+
+      if (result.ok) {
+        alert("Restauración desde nube completada correctamente.");
+      } else {
+        alert("Restauración completada con incidencias. Revisa el detalle en pantalla.");
+      }
+    } catch (error) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : "Error desconocido";
+      alert(`No fue posible restaurar desde la nube: ${message}`);
+    } finally {
+      setIsRestoringCloud(false);
     }
   };
 
@@ -244,10 +275,18 @@ export default function Ajustes() {
       }
 
       await navigator.clipboard.writeText(valueToCopy);
-      alert(`IP copiada: ${valueToCopy}`);
+      setDiscoveryFeedback({
+        kind: "success",
+        message: `IP copiada al portapapeles: ${valueToCopy}`,
+        updatedAt: new Date().toISOString(),
+      });
     } catch (error) {
       console.error(error);
-      alert("No fue posible copiar la IP al portapapeles.");
+      setDiscoveryFeedback({
+        kind: "error",
+        message: "No fue posible copiar la IP al portapapeles.",
+        updatedAt: new Date().toISOString(),
+      });
     }
   };
 
@@ -618,6 +657,43 @@ export default function Ajustes() {
                   : "Servidor detenido."
                 : "Operación local sin red LAN."}
           </p>
+        </div>
+
+        <div className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50 p-4 dark:border-indigo-900/30 dark:bg-indigo-950/20">
+          <p className="text-sm font-semibold text-indigo-900 dark:text-indigo-200">Restauración desde nube (respaldo)</p>
+          <p className="mt-1 text-xs text-indigo-900/90 dark:text-indigo-100/90">
+            Si este equipo pierde la base local, puedes recuperar datos almacenados en Supabase.
+          </p>
+
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={handleRestoreFromCloud}
+              disabled={isRestoringCloud}
+              className="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-70 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200 dark:hover:bg-indigo-900/50"
+            >
+              {isRestoringCloud ? "Restaurando desde nube..." : "Restaurar respaldo desde nube"}
+            </button>
+          </div>
+
+          {restoreSummary ? (
+            <div className="mt-3 rounded-lg border border-indigo-200 bg-white p-3 text-xs dark:border-indigo-800 dark:bg-indigo-950/30">
+              <p className="font-semibold text-indigo-900 dark:text-indigo-100">
+                Resultado: {restoreSummary.ok ? "Completado" : "Completado con incidencias"}
+              </p>
+              <p className="mt-1 text-indigo-900/90 dark:text-indigo-100/90">
+                Inicio: {new Date(restoreSummary.startedAt).toLocaleString()} | Fin: {restoreSummary.finishedAt ? new Date(restoreSummary.finishedAt).toLocaleString() : "-"}
+              </p>
+              <div className="mt-2 space-y-1">
+                {Object.entries(restoreSummary.tables).map(([table, tableResult]) => (
+                  <p key={table} className="text-indigo-900/90 dark:text-indigo-100/90">
+                    {table}: {tableResult.status} ({tableResult.restored})
+                    {tableResult.error ? ` - ${tableResult.error}` : ""}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-6 flex justify-end gap-2">

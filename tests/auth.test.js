@@ -12,54 +12,65 @@ vi.mock("better-sqlite3", () => {
       pragma() {}
       exec() {}
       prepare(query) {
+        const compactQuery = String(query).replace(/\s+/g, " ").trim();
+
         return {
           all: () => {
             return Object.values(this.store.app_users);
           },
           get: (param) => {
-            if (query.includes("COUNT")) {
+            if (compactQuery.includes("COUNT")) {
               return { total: Object.keys(this.store.app_users).length };
             }
             // Simple match logic
             const values = Object.values(this.store.app_users);
-            if (query.includes("username_hash")) {
+            if (compactQuery.includes("username_hash")) {
               return values.find(u => u.username_hash === param) || null;
             }
-            if (query.includes("id = ?")) {
+            if (compactQuery.includes("id = ?")) {
               return values.find(u => u.id === param) || null;
             }
             return null;
           },
-          run: (params) => {
-            if (query.includes("INSERT INTO app_users")) {
+          run: (...args) => {
+            if (compactQuery.includes("INSERT INTO app_users")) {
+              const params = args[0];
               const u = {
                 id: params.id,
                 username_hash: params.usernameHash,
                 username_encrypted: params.usernameEncrypted,
                 display_name_encrypted: params.displayNameEncrypted,
                 password_hash: params.passwordHash,
+                password_set: params.passwordSet,
                 role: params.role,
                 status: "active",
-                requires_password_reset: 0,
+                requires_password_reset: params.requiresPasswordReset || 0,
                 created_at: params.createdAt,
                 updated_at: params.updatedAt,
               };
               this.store.app_users[u.id] = u;
-            } else if (query.includes("UPDATE app_users SET status")) {
-              const id = params; // direct param
+            } else if (compactQuery.includes("UPDATE app_users SET status = 'inactive'")) {
+              const id = args[0];
               if (this.store.app_users[id]) {
                 this.store.app_users[id].status = "inactive";
               }
-            } else if (query.includes("UPDATE app_users SET requires_password_reset")) {
-              const id = params; // direct param
+            } else if (compactQuery.includes("UPDATE app_users SET status = 'active'")) {
+              const id = args[0];
+              if (this.store.app_users[id]) {
+                this.store.app_users[id].status = "active";
+              }
+            } else if (compactQuery.includes("UPDATE app_users SET requires_password_reset")) {
+              const id = args[0];
               if (this.store.app_users[id]) {
                 this.store.app_users[id].requires_password_reset = 1;
               }
-            } else if (query.includes("UPDATE app_users SET password_hash")) {
-              // Simulating key/val updates
-              const values = Object.values(this.store.app_users);
-              if (values.length > 0) {
-                values[0].requires_password_reset = 0;
+            } else if (compactQuery.includes("UPDATE app_users SET password_hash")) {
+              const [passwordHash, updatedAt, id] = args;
+              if (this.store.app_users[id]) {
+                this.store.app_users[id].password_hash = passwordHash;
+                this.store.app_users[id].password_set = 1;
+                this.store.app_users[id].requires_password_reset = 0;
+                this.store.app_users[id].updated_at = updatedAt;
               }
             }
             return { changes: 1 };
@@ -131,5 +142,50 @@ describe("AuthStore User Management & Roles", () => {
     const users = store.listUsers();
     const updated = users.find(u => u.id === userToReset.id);
     expect(updated?.requiresPasswordReset).toBe(true);
+  });
+
+  it("should require initial password setup when user is created without password", () => {
+    const operator = store.createUser({
+      username: "caja4",
+      password: "",
+      role: "caja"
+    });
+
+    const state = store.getSignInState(operator.username);
+    expect(state.exists).toBe(true);
+    expect(state.hasPassword).toBe(false);
+    expect(state.requiresPasswordReset).toBe(true);
+
+    expect(() => {
+      store.signIn({ username: "caja4", password: "any-pass" });
+    }).toThrow("Debes configurar tu clave inicial desde la pantalla de acceso.");
+  });
+
+  it("should allow sign in after setting initial password", () => {
+    store.setInitialPassword({
+      username: "caja4",
+      newPassword: "claveSegura123"
+    });
+
+    const signedIn = store.signIn({
+      username: "caja4",
+      password: "claveSegura123"
+    });
+
+    expect(signedIn.username).toBe("caja4");
+
+    const state = store.getSignInState("caja4");
+    expect(state.hasPassword).toBe(true);
+    expect(state.requiresPasswordReset).toBe(false);
+  });
+
+  it("should reject invalid roles when creating users", () => {
+    expect(() => {
+      store.createUser({
+        username: "qauser",
+        password: "validpass123",
+        role: "supervisor"
+      });
+    }).toThrow("Rol invalido.");
   });
 });

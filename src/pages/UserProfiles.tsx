@@ -1,36 +1,41 @@
 import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import PageMeta from "../components/common/PageMeta";
 import PageBreadcrumb from "../components/common/PageBreadCrumb";
 import { useAuth } from "../hooks/useAuth";
+import {
+  resetPasswordSchema,
+  type ResetPasswordFormValues,
+} from "../validation/forms";
 
 export default function UserProfiles() {
   const { user, changePassword } = useAuth();
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<ResetPasswordFormValues>({
+    resolver: zodResolver(resetPasswordSchema),
+    defaultValues: {
+      newPassword: "",
+      confirmPassword: "",
+    },
+  });
+
+  const handleChangePassword = async (values: ResetPasswordFormValues) => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (newPassword.length < 8) {
-      setErrorMessage("La clave debe tener al menos 8 caracteres.");
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setErrorMessage("Las claves no coinciden.");
-      return;
-    }
-
     setIsSubmitting(true);
     try {
-      await changePassword(newPassword);
-      setNewPassword("");
-      setConfirmPassword("");
+      await changePassword(values.newPassword);
+      reset();
       setSuccessMessage("Clave actualizada correctamente.");
     } catch (error) {
       if (error instanceof Error) {
@@ -90,18 +95,20 @@ export default function UserProfiles() {
             Cambiar Clave
           </h3>
 
-          <form className="space-y-4" onSubmit={handleChangePassword}>
+          <form className="space-y-4" onSubmit={handleSubmit(handleChangePassword)}>
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Nueva clave
               </label>
               <input
                 type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
+                {...register("newPassword")}
                 placeholder="Minimo 8 caracteres"
                 className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
               />
+              {errors.newPassword && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.newPassword.message}</p>
+              )}
             </div>
 
             <div>
@@ -110,11 +117,13 @@ export default function UserProfiles() {
               </label>
               <input
                 type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                {...register("confirmPassword")}
                 placeholder="Repite la nueva clave"
                 className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
               />
+              {errors.confirmPassword && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.confirmPassword.message}</p>
+              )}
             </div>
 
             {errorMessage && (

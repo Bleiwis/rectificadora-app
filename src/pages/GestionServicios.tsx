@@ -1,7 +1,14 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import PageBreadcrumb from "../components/common/PageBreadCrumb";
 import PageMeta from "../components/common/PageMeta";
 import { useAuth } from "../hooks/useAuth";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  serviceFormSchema,
+  type ServiceFormInputValues,
+  type ServiceFormValues,
+} from "../validation/forms";
 
 interface ServiceItem {
   id: string;
@@ -18,11 +25,19 @@ export default function GestionServicios() {
   const isCaja = user?.role === "caja";
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
-    name: "",
-    category: "Tapa de Cilindros",
-    description: "",
-    priceUSD: "",
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<ServiceFormInputValues, unknown, ServiceFormValues>({
+    resolver: zodResolver(serviceFormSchema),
+    defaultValues: {
+      name: "",
+      category: "Tapa de Cilindros",
+      description: "",
+      priceUSD: 0,
+    },
   });
 
   const loadServices = () => {
@@ -39,35 +54,23 @@ export default function GestionServicios() {
     loadServices();
   }, []);
 
-  const handleChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
-  ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
   const handleCancelEdit = () => {
     setEditingId(null);
-    setFormData({
+    reset({
       name: "",
       category: "Tapa de Cilindros",
       description: "",
-      priceUSD: "",
+      priceUSD: 0,
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.name || !formData.priceUSD) return;
-
+  const onSubmit = (values: ServiceFormValues) => {
     const serviceData: ServiceItem = {
       id: editingId || Date.now().toString(),
-      name: formData.name,
-      category: formData.category,
-      description: formData.description,
-      priceUSD: parseFloat(formData.priceUSD),
+      name: values.name,
+      category: values.category,
+      description: values.description || "",
+      priceUSD: Number(values.priceUSD),
     };
 
     window.database.saveService(serviceData)
@@ -80,23 +83,30 @@ export default function GestionServicios() {
 
   const handleEdit = (service: ServiceItem) => {
     setEditingId(service.id);
-    setFormData({
+    reset({
       name: service.name,
       category: service.category,
       description: service.description,
-      priceUSD: service.priceUSD.toString(),
+      priceUSD: service.priceUSD,
     });
   };
+
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const handleDelete = (id: string) => {
     if (editingId === id) {
       handleCancelEdit();
     }
-    if (window.confirm("¿Está seguro de que desea eliminar este servicio?")) {
-      window.database.deleteService(id)
-        .then(loadServices)
-        .catch(console.error);
-    }
+    setDeleteConfirmId(id);
+  };
+
+  const confirmDeleteAction = (id: string) => {
+    window.database.deleteService(id)
+      .then(() => {
+        setDeleteConfirmId(null);
+        loadServices();
+      })
+      .catch(console.error);
   };
 
   return (
@@ -116,20 +126,18 @@ export default function GestionServicios() {
                 {editingId ? "Editar Servicio o Parte" : "Crear Nuevo Servicio o Parte"}
               </h3>
               
-              <form onSubmit={handleSubmit} className="space-y-5">
+              <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
                 <div>
                   <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Nombre del Servicio o Parte
                   </label>
                   <input
                     type="text"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleChange}
+                    {...register("name")}
                     placeholder="Ej. Rectificado de biela, Baño químico"
-                    required
                     className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
                   />
+                  {errors.name && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.name.message}</p>}
                 </div>
 
                 <div>
@@ -137,9 +145,7 @@ export default function GestionServicios() {
                     Categoría
                   </label>
                   <select
-                    name="category"
-                    value={formData.category}
-                    onChange={handleChange}
+                    {...register("category")}
                     className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
                   >
                     <option value="Tapa de Cilindros">Tapa de Cilindros</option>
@@ -149,6 +155,7 @@ export default function GestionServicios() {
                     <option value="Repuestos">Repuestos / Partes</option>
                     <option value="Otros">Otros Servicios</option>
                   </select>
+                  {errors.category && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.category.message}</p>}
                 </div>
 
                 <div>
@@ -161,16 +168,14 @@ export default function GestionServicios() {
                     </span>
                     <input
                       type="number"
-                      name="priceUSD"
+                      {...register("priceUSD", { valueAsNumber: true })}
                       step="0.01"
                       min="0"
-                      value={formData.priceUSD}
-                      onChange={handleChange}
                       placeholder="0.00"
-                      required
                       className="w-full rounded-lg border border-gray-300 bg-transparent pl-8 pr-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
                     />
                   </div>
+                  {errors.priceUSD && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.priceUSD.message}</p>}
                 </div>
 
                 <div>
@@ -178,13 +183,12 @@ export default function GestionServicios() {
                     Detalles / Descripción
                   </label>
                   <textarea
-                    name="description"
-                    value={formData.description}
-                    onChange={handleChange}
+                    {...register("description")}
                     rows={3}
                     placeholder="Detalle del trabajo, tolerancias o especificaciones..."
                     className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
                   />
+                  {errors.description && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.description.message}</p>}
                 </div>
 
                 <div className="flex gap-3">
@@ -296,6 +300,36 @@ export default function GestionServicios() {
           </div>
         </div>
       </div>
+
+      {/* Modal de Confirmación de Eliminación */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              ¿Eliminar servicio?
+            </h3>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+              Esta acción eliminará la tarifa del catálogo de servicios locales.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmId(null)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => confirmDeleteAction(deleteConfirmId)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                Sí, eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

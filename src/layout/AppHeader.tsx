@@ -68,14 +68,9 @@ const AppHeader: React.FC = () => {
 
           <Link to="/" className="lg:hidden">
             <img
-              className="dark:hidden"
-              src="./images/logo/logo.svg"
-              alt="Logo"
-            />
-            <img
-              className="hidden dark:block"
-              src="./images/logo/logo-dark.svg"
-              alt="Logo"
+              className="h-8 w-auto object-contain"
+              src="/images/logo/logo.png"
+              alt="Rectificadora App"
             />
           </Link>
 

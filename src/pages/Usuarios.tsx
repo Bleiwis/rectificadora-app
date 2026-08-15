@@ -1,8 +1,14 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import PageBreadcrumb from "../components/common/PageBreadCrumb";
 import PageMeta from "../components/common/PageMeta";
 import { useAuth } from "../hooks/useAuth";
 import { Navigate } from "react-router";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  createUserSchema,
+  type CreateUserFormValues,
+} from "../validation/forms";
 
 interface UserListItem {
   id: string;
@@ -19,11 +25,21 @@ export default function Usuarios() {
   const [usersList, setUsersList] = useState<UserListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Form State
-  const [username, setUsername] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [role, setRole] = useState<"administrador" | "caja">("caja");
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<CreateUserFormValues>({
+    resolver: zodResolver(createUserSchema),
+    defaultValues: {
+      username: "",
+      displayName: "",
+      role: "caja",
+    },
+  });
 
   const isAdmin = user?.role === "master" || user?.role === "administrador";
 
@@ -56,21 +72,17 @@ export default function Usuarios() {
     return <Navigate to="/" replace />;
   }
 
-  const handleCreateUser = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreateUser = (values: CreateUserFormValues) => {
     setErrorMessage(null);
 
-    if (!username) {
-      setErrorMessage("Nombre de usuario es requerido.");
-      return;
-    }
-
-    window.desktopAuth?.createUser({ username, displayName, role })
+    window.desktopAuth?.createUser({
+      username: values.username,
+      displayName: values.displayName || "",
+      role: values.role,
+    })
       .then((res) => {
         if (res.ok) {
-          setUsername("");
-          setDisplayName("");
-          setRole("caja");
+          reset();
           loadUsers();
         } else {
           setErrorMessage(res.error || "No se pudo crear el usuario.");
@@ -82,46 +94,54 @@ export default function Usuarios() {
   };
 
   const handleDeactivate = (userId: string) => {
-    if (window.confirm("¿Está seguro de que desea dar de baja a este usuario?")) {
-      window.desktopAuth?.deactivateUser(userId)
-        .then((res) => {
-          if (res.ok) {
-            loadUsers();
-          } else {
-            alert(res.error || "No se pudo dar de baja al usuario.");
-          }
-        })
-        .catch(console.error);
-    }
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    window.desktopAuth?.deactivateUser(userId)
+      .then((res) => {
+        if (res.ok) {
+          setSuccessMessage("Usuario dado de baja exitosamente.");
+          loadUsers();
+        } else {
+          setErrorMessage(res.error || "No se pudo dar de baja al usuario.");
+        }
+      })
+      .catch((err) => {
+        setErrorMessage(err.message || "Error al dar de baja al usuario.");
+      });
   };
 
   const handleRequestPasswordReset = (userId: string) => {
-    if (window.confirm("¿Desea forzar al usuario a cambiar su contraseña en su próximo inicio de sesión?")) {
-      window.desktopAuth?.flagPasswordReset(userId)
-        .then((res) => {
-          if (res.ok) {
-            alert("El usuario deberá cambiar su contraseña al ingresar.");
-            loadUsers();
-          } else {
-            alert(res.error || "No se pudo marcar para cambio de clave.");
-          }
-        })
-        .catch(console.error);
-    }
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    window.desktopAuth?.flagPasswordReset(userId)
+      .then((res) => {
+        if (res.ok) {
+          setSuccessMessage("El usuario deberá cambiar su contraseña al ingresar.");
+          loadUsers();
+        } else {
+          setErrorMessage(res.error || "No se pudo marcar para cambio de clave.");
+        }
+      })
+      .catch((err) => {
+        setErrorMessage(err.message || "Error al solicitar reseteo de clave.");
+      });
   };
 
   const handleRestore = (userId: string) => {
-    if (window.confirm("¿Desea reactivar la cuenta de este usuario?")) {
-      window.desktopAuth?.restoreUser(userId)
-        .then((res) => {
-          if (res.ok) {
-            loadUsers();
-          } else {
-            alert(res.error || "No se pudo reactivar al usuario.");
-          }
-        })
-        .catch(console.error);
-    }
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    window.desktopAuth?.restoreUser(userId)
+      .then((res) => {
+        if (res.ok) {
+          setSuccessMessage("Cuenta de usuario reactivada exitosamente.");
+          loadUsers();
+        } else {
+          setErrorMessage(res.error || "No se pudo reactivar al usuario.");
+        }
+      })
+      .catch((err) => {
+        setErrorMessage(err.message || "Error al reactivar al usuario.");
+      });
   };
 
   return (
@@ -146,19 +166,26 @@ export default function Usuarios() {
               </div>
             )}
 
-            <form onSubmit={handleCreateUser} className="space-y-5">
+            {successMessage && (
+              <div className="mb-4 rounded-lg bg-green-50 p-4 text-sm text-green-600 dark:bg-green-950/20 dark:text-green-400">
+                {successMessage}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit(handleCreateUser)} className="space-y-5">
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Usuario <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
-                  required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  {...register("username")}
                   placeholder="Ej. pedro.caja"
                   className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
                 />
+                {errors.username && (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.username.message}</p>
+                )}
               </div>
 
               <div>
@@ -167,11 +194,13 @@ export default function Usuarios() {
                 </label>
                 <input
                   type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
+                  {...register("displayName")}
                   placeholder="Ej. Pedro Gómez"
                   className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
                 />
+                {errors.displayName && (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.displayName.message}</p>
+                )}
               </div>
 
               <div>
@@ -179,13 +208,15 @@ export default function Usuarios() {
                   Rol / Permisos
                 </label>
                 <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as "administrador" | "caja")}
+                  {...register("role")}
                   className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
                 >
                   <option value="caja">Caja / Vendedor (Acceso restringido)</option>
                   <option value="administrador">Administrador (Acceso total)</option>
                 </select>
+                {errors.role && (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.role.message}</p>
+                )}
               </div>
 
               <button

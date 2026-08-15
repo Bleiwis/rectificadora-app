@@ -1,5 +1,5 @@
 import "./runtime-env.js";
-import { app, BrowserWindow, net, protocol, ipcMain } from "electron";
+import { app, BrowserWindow, net, protocol, ipcMain, Tray, Menu, Notification, nativeImage, shell } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -29,8 +29,15 @@ import {
   getOrdersFromLan,
   getServicesFromLan,
   getInventoryFromLan,
+  getLicenseStatusFromLan,
+  refreshLicenseFromLan,
 } from "./lan-order-service.js";
-import { startSyncInterval, stopSyncInterval, processOutbox } from "./supabase-sync.js";
+import {
+  startSyncInterval,
+  stopSyncInterval,
+  processOutbox,
+  restoreFromCloudBackup,
+} from "./supabase-sync.js";
 import {
   initializeLicenseService,
   stopLicenseService,
@@ -63,6 +70,341 @@ const preloadFile = path.join(__dirname, "../preload/index.cjs");
 const distPath = path.join(__dirname, "../../dist");
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
+
+let mainWindow = null;
+let tray = null;
+let isQuitting = false;
+let hasShownBackgroundNotification = false;
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatMoney(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "0.00";
+  return amount.toFixed(2);
+}
+
+let orderNoteLogoDataUrl = null;
+
+function resolveOrderNoteLogoDataUrl() {
+  if (orderNoteLogoDataUrl !== null) {
+    return orderNoteLogoDataUrl;
+  }
+
+  const logoCandidates = [
+    path.join(distPath, "images/logo/logo.png"),
+    path.join(__dirname, "../../public/images/logo/logo.png"),
+  ];
+
+  for (const logoPath of logoCandidates) {
+    if (!fs.existsSync(logoPath)) continue;
+
+    try {
+      const binary = fs.readFileSync(logoPath);
+      const ext = path.extname(logoPath).toLowerCase();
+      const mimeType =
+        ext === ".svg"
+          ? "image/svg+xml"
+          : ext === ".jpg" || ext === ".jpeg"
+            ? "image/jpeg"
+            : "image/png";
+      orderNoteLogoDataUrl = `data:${mimeType};base64,${binary.toString("base64")}`;
+      return orderNoteLogoDataUrl;
+    } catch {
+      // Keep looking on fallback paths.
+    }
+  }
+
+  orderNoteLogoDataUrl = "";
+  return orderNoteLogoDataUrl;
+}
+
+function buildOrderNoteHtml(payload) {
+  const logoDataUrl = resolveOrderNoteLogoDataUrl();
+  const parts = Array.isArray(payload?.parts) ? payload.parts : [];
+  const services = Array.isArray(payload?.services) ? payload.services : [];
+  const inventoryItems = Array.isArray(payload?.inventoryItems)
+    ? payload.inventoryItems
+    : [];
+
+  const partsRows = parts
+    .map((part) => {
+      const partName =
+        part?.partName === "Otro (Escribir abajo)"
+          ? part?.customName || "Otro"
+          : part?.partName || "Parte";
+      return `
+        <tr>
+          <td>${escapeHtml(partName)}</td>
+          <td class="text-center">${escapeHtml(part?.quantity ?? "")}</td>
+          <td>${escapeHtml(part?.measurement ?? "")}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  const servicesRows = services
+    .map(
+      (service) => `
+        <tr>
+          <td>${escapeHtml(service?.name || "Servicio")}</td>
+          <td class="text-right">$${formatMoney(service?.priceUSD)} USD</td>
+        </tr>
+      `,
+    )
+    .join("");
+
+  const inventoryRows = inventoryItems
+    .map((item) => {
+      const qty = Number(item?.quantity || 0);
+      const unitPrice = Number(item?.priceUSD || 0);
+      return `
+        <tr>
+          <td>${escapeHtml(item?.name || "Ítem")}</td>
+          <td class="text-center">${escapeHtml(qty)}</td>
+          <td class="text-right">$${formatMoney(unitPrice * qty)} USD</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nota de Entrega ${escapeHtml(payload?.code || "")}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 14mm;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      color: #0f172a;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      font-size: 12px;
+      line-height: 1.45;
+      background: #ffffff;
+    }
+    .doc {
+      width: 100%;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      border-bottom: 1px solid #d1d5db;
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+    }
+    .brand-title {
+      margin: 0;
+      font-size: 20px;
+      color: #2563eb;
+    }
+    .brand {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .brand-logo {
+      width: 58px;
+      height: 58px;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+    .muted {
+      color: #475569;
+      margin: 2px 0;
+    }
+    .note-number {
+      text-align: right;
+    }
+    .note-number strong {
+      display: block;
+      font-size: 20px;
+      color: #2563eb;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .section-title {
+      margin: 0 0 4px;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      color: #64748b;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 14px;
+    }
+    th,
+    td {
+      border: 1px solid #d1d5db;
+      padding: 6px 8px;
+      vertical-align: top;
+    }
+    th {
+      background: #f8fafc;
+      text-align: left;
+      font-size: 11px;
+    }
+    .text-right {
+      text-align: right;
+    }
+    .text-center {
+      text-align: center;
+    }
+    .summary {
+      margin-top: 8px;
+      padding-top: 10px;
+      border-top: 1px solid #d1d5db;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 14px;
+    }
+    .status {
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .status-paga {
+      color: #15803d;
+    }
+    .status-abonada {
+      color: #1d4ed8;
+    }
+    .status-pendiente {
+      color: #a16207;
+    }
+    .totals {
+      text-align: right;
+    }
+    .totals .main {
+      font-size: 20px;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <main class="doc">
+    <header class="header">
+      <div class="brand">
+        ${logoDataUrl ? `<img class="brand-logo" src="${logoDataUrl}" alt="Logo Rectificadora Bruno C.A" />` : ""}
+        <div>
+          <h1 class="brand-title">Rectificadora Bruno C.A</h1>
+          <p class="muted"><strong>RIF:</strong> J-507200914</p>
+          <p class="muted">Cuidado y precisión para su motor</p>
+        </div>
+      </div>
+      <div class="note-number">
+        <div class="section-title">Nota de entrega</div>
+        <strong>Nº ${escapeHtml(payload?.code || "")}</strong>
+        <p class="muted">Ingreso: ${escapeHtml(payload?.entryDate || "")}</p>
+      </div>
+    </header>
+
+    <section class="grid">
+      <div>
+        <p class="section-title">Cliente</p>
+        <div><strong>${escapeHtml(payload?.clientName || "")} ${escapeHtml(payload?.clientLastName || "")}</strong></div>
+        <div>Cédula: ${escapeHtml(payload?.clientCI || "")}</div>
+        <div>Teléfono: ${escapeHtml(payload?.clientPhone || "")}</div>
+        ${payload?.clientAddress ? `<div>Dirección: ${escapeHtml(payload.clientAddress)}</div>` : ""}
+      </div>
+      <div>
+        <p class="section-title">Detalles motor</p>
+        <div><strong>${escapeHtml(payload?.engineModel || "")}</strong></div>
+        <div class="muted" style="margin-top: 8px;">Recibido por: ${escapeHtml(payload?.createdBy || "")}</div>
+      </div>
+    </section>
+
+    <section>
+      <p class="section-title">Partes de motor recibidas</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Descripción de Parte</th>
+            <th style="width: 90px;">Cant.</th>
+            <th style="width: 160px;">Medida Salida</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${partsRows || '<tr><td colspan="3">Sin partes registradas.</td></tr>'}
+        </tbody>
+      </table>
+    </section>
+
+    ${servicesRows
+      ? `
+      <section>
+        <p class="section-title">Servicios realizados</p>
+        <table>
+          <tbody>${servicesRows}</tbody>
+        </table>
+      </section>
+    `
+      : ""}
+
+    ${inventoryRows
+      ? `
+      <section>
+        <p class="section-title">Repuestos e insumos adicionales</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Repuesto</th>
+              <th style="width: 90px;">Cant.</th>
+              <th style="width: 160px;" class="text-right">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>${inventoryRows}</tbody>
+        </table>
+      </section>
+    `
+      : ""}
+
+    <section class="summary">
+      <div>
+        <div class="section-title">Estado de nota</div>
+        <div class="status ${
+          payload?.paymentStatus === "Paga"
+            ? "status-paga"
+            : payload?.paymentStatus === "Abonada"
+              ? "status-abonada"
+              : "status-pendiente"
+        }">
+          ${escapeHtml(payload?.paymentStatus || "Pendiente por cobrar")}
+        </div>
+      </div>
+      <div class="totals">
+        <div class="section-title">Total orden</div>
+        <div class="main">$${formatMoney(payload?.totalUSD)} USD</div>
+        <div>Abonado: $${formatMoney(payload?.paidUSD)} USD</div>
+        <div>Saldo pendiente: $${formatMoney(payload?.balanceUSD)} USD</div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>`;
+}
 
 function isDefaultStandaloneLanConfig(config) {
   return (
@@ -110,13 +452,106 @@ function getEffectiveLanConfig() {
   };
 }
 
-function applyLanServerMode() {
+function applyLanServerMode(authStore = null) {
   const config = getEffectiveLanConfig();
+  let result = { running: false };
   if (config.mode === "server") {
-    return startLanOrderServer(config);
+    result = startLanOrderServer(config, authStore);
+    // Server listen/error events are asynchronous; refresh tray after boot settles.
+    setTimeout(() => updateTrayMenu(), 600);
+    setTimeout(() => updateTrayMenu(), 1800);
+  } else {
+    stopLanOrderServer();
   }
-  stopLanOrderServer();
-  return { running: false };
+  updateTrayMenu();
+  return result;
+}
+
+function getTrayIcon() {
+  const faviconPath = path.join(distPath, "favicon.png");
+  const publicFavicon = path.join(__dirname, "../../public/favicon.png");
+  const targetPath = fs.existsSync(faviconPath) ? faviconPath : publicFavicon;
+
+  if (fs.existsSync(targetPath)) {
+    return nativeImage.createFromPath(targetPath);
+  }
+  return nativeImage.createEmpty();
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+
+  const config = getEffectiveLanConfig();
+  const serverStatus = getLanOrderServerStatus();
+
+  let modeLabel = "Modo: Monousuario (Standalone)";
+  if (config.mode === "server") {
+    if (serverStatus.running) {
+      modeLabel = `Servidor LAN Activo (Puerto ${serverStatus.port || config.port})`;
+    } else if (serverStatus.lastError) {
+      modeLabel = `Servidor LAN Inactivo (${serverStatus.lastError})`;
+    } else if (serverStatus.host || serverStatus.port) {
+      modeLabel = `Servidor LAN Iniciando... (Puerto ${serverStatus.port || config.port})`;
+    } else {
+      modeLabel = "Servidor LAN Inactivo";
+    }
+  } else if (config.mode === "client") {
+    modeLabel = `Modo Cliente LAN (${config.host}:${config.port})`;
+  }
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: "Rectificadora Bruno C.A",
+      enabled: false,
+    },
+    {
+      label: modeLabel,
+      enabled: false,
+    },
+    { type: "separator" },
+    {
+      label: "Abrir Aplicación",
+      click: () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        } else {
+          createMainWindow();
+        }
+      },
+    },
+    { type: "separator" },
+    {
+      label: "Salir por Completo",
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+  tray.setToolTip(`Rectificadora Bruno C.A - ${modeLabel}`);
+}
+
+function createSystemTray() {
+  if (tray) return;
+
+  const icon = getTrayIcon();
+  tray = new Tray(icon);
+
+  tray.on("double-click", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createMainWindow();
+    }
+  });
+
+  updateTrayMenu();
 }
 
 async function resolveClientLanConfig(baseConfig) {
@@ -296,13 +731,14 @@ function registerAppProtocol() {
 }
 
 function createMainWindow() {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1100,
     minHeight: 700,
     autoHideMenuBar: true,
     show: false,
+    icon: getTrayIcon(),
     webPreferences: {
       preload: preloadFile,
       contextIsolation: true,
@@ -313,6 +749,23 @@ function createMainWindow() {
 
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
+  });
+
+  mainWindow.on("close", (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+
+      if (!hasShownBackgroundNotification) {
+        hasShownBackgroundNotification = true;
+        if (Notification.isSupported()) {
+          new Notification({
+            title: "Rectificadora Bruno C.A",
+            body: "La aplicación sigue ejecutándose en segundo plano para mantener los servicios activos.",
+          }).show();
+        }
+      }
+    }
   });
 
   mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
@@ -342,7 +795,7 @@ function createMainWindow() {
   mainWindow.loadURL("app://-/index.html");
 }
 
-function registerDbIpcHandlers() {
+function registerDbIpcHandlers(authStore = null) {
   ipcMain.handle("db:get-services", async () => {
     const config = getEffectiveLanConfig();
     if (config.mode === "client") {
@@ -425,6 +878,10 @@ function registerDbIpcHandlers() {
     return true;
   });
 
+  ipcMain.handle("db:restore-from-cloud", async (_, options) => {
+    return restoreFromCloudBackup(options || {});
+  });
+
   ipcMain.handle("db:get-bcv-usd-rate", () => getLatestBcvUsdRate());
   ipcMain.handle("db:refresh-bcv-usd-rate", () =>
     refreshBcvUsdRateSafe({ force: true, reason: "manual" }),
@@ -453,7 +910,7 @@ function registerDbIpcHandlers() {
       modeLocked: current.modeLocked,
       installedRole: current.installedRole,
     });
-    applyLanServerMode();
+    applyLanServerMode(authStore);
     return next;
   });
   ipcMain.handle("db:get-lan-status", async () => {
@@ -514,11 +971,127 @@ function registerDbIpcHandlers() {
     }
   });
   ipcMain.handle("db:get-local-network-ips", () => getLocalNetworkIps());
+
+  ipcMain.handle("db:print-order-note", async (_, payload) => {
+    let printWindow = null;
+    try {
+      const html = buildOrderNoteHtml(payload || {});
+      const printUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+
+      printWindow = new BrowserWindow({
+        width: 900,
+        height: 1200,
+        show: false,
+        backgroundColor: "#ffffff",
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+        },
+      });
+
+      await printWindow.loadURL(printUrl);
+
+      const pdfBuffer = await printWindow.webContents.printToPDF({
+        printBackground: true,
+        pageSize: "A4",
+        margins: {
+          top: 0,
+          bottom: 0,
+          left: 0,
+          right: 0,
+        },
+        preferCSSPageSize: true,
+      });
+
+      const tempDir = app.getPath("temp");
+      const safeCode = String(payload?.code || "nota")
+        .replace(/[^a-z0-9_-]/gi, "-")
+        .slice(0, 48);
+      const pdfPath = path.join(
+        tempDir,
+        `nota-entrega-${safeCode}-${Date.now()}.pdf`,
+      );
+
+      await fs.promises.writeFile(pdfPath, pdfBuffer);
+      const openError = await shell.openPath(pdfPath);
+      if (openError) {
+        throw new Error(openError);
+      }
+
+      return { ok: true, filePath: pdfPath };
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "No fue posible generar la nota en PDF.",
+      };
+    } finally {
+      if (printWindow && !printWindow.isDestroyed()) {
+        printWindow.destroy();
+      }
+    }
+  });
 }
 
 function registerLicenseIpcHandlers() {
-  ipcMain.handle("license:get-status", () => getLicenseStatus());
-  ipcMain.handle("license:refresh", () => refreshLicense("manual"));
+  ipcMain.handle("license:get-status", async () => {
+    const config = getEffectiveLanConfig();
+    if (config.mode === "client") {
+      try {
+        const resolvedConfig = await resolveClientLanConfig(config);
+        const remoteStatus = await getLicenseStatusFromLan(resolvedConfig);
+        if (remoteStatus) {
+          return remoteStatus;
+        }
+      } catch (error) {
+        return {
+          status: "blocked",
+          reason: "lan-server-unreachable",
+          installationId: "desconocida (modo cliente)",
+          nowIso: new Date().toISOString(),
+          warningStartAt: null,
+          blockAt: null,
+          daysUntilBlock: 0,
+          periodLabel: null,
+          lastSyncAt: null,
+          lastError: error instanceof Error ? error.message : "No fue posible conectar con el servidor LAN.",
+          insecureMode: false,
+        };
+      }
+    }
+    return getLicenseStatus();
+  });
+
+  ipcMain.handle("license:refresh", async () => {
+    const config = getEffectiveLanConfig();
+    if (config.mode === "client") {
+      try {
+        const resolvedConfig = await resolveClientLanConfig(config);
+        const remoteStatus = await refreshLicenseFromLan(resolvedConfig);
+        if (remoteStatus) {
+          return remoteStatus;
+        }
+      } catch (error) {
+        return {
+          status: "blocked",
+          reason: "lan-server-unreachable",
+          installationId: "desconocida (modo cliente)",
+          nowIso: new Date().toISOString(),
+          warningStartAt: null,
+          blockAt: null,
+          daysUntilBlock: 0,
+          periodLabel: null,
+          lastSyncAt: null,
+          lastError: error instanceof Error ? error.message : "No fue posible conectar con el servidor LAN.",
+          insecureMode: false,
+        };
+      }
+    }
+    return refreshLicense("manual");
+  });
 }
 
 app.whenReady().then(() => {
@@ -541,33 +1114,45 @@ app.whenReady().then(() => {
     console.error("[auth-mirror] failed bootstrap", error);
   }
 
-  registerAuthIpcHandlers(authStore, mirrorAuthUser);
-  registerDbIpcHandlers();
+  registerAuthIpcHandlers(authStore, mirrorAuthUser, {
+    getLanConfig: getEffectiveLanConfig,
+    resolveClientLanConfig,
+  });
+  registerDbIpcHandlers(authStore);
   registerLicenseIpcHandlers();
 
   if (!isDevelopment) {
     registerAppProtocol();
   }
 
+  createSystemTray();
   createMainWindow();
-  applyLanServerMode();
-  initializeLicenseService({ refreshIntervalMs: 5 * 60 * 1000 });
+  applyLanServerMode(authStore);
+  const effectiveLanConfig = getEffectiveLanConfig();
+  if (effectiveLanConfig.mode !== "client") {
+    initializeLicenseService({ refreshIntervalMs: 5 * 60 * 1000 });
+  }
   startSyncInterval(30000); // Check outbox every 30 seconds
   startBcvRateSyncInterval(60 * 1000);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();
+    } else if (mainWindow) {
+      mainWindow.show();
     }
   });
 });
 
 app.on("window-all-closed", () => {
-  stopLanOrderServer();
-  stopLicenseService();
-  stopSyncInterval();
-  stopBcvRateSyncInterval();
-  if (process.platform !== "darwin") {
-    app.quit();
+  if (isQuitting) {
+    stopLanOrderServer();
+    stopLicenseService();
+    stopSyncInterval();
+    stopBcvRateSyncInterval();
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
   }
 });
+

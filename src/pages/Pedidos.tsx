@@ -17,6 +17,17 @@ import {
   OrderPaymentRow,
   PartRow,
 } from "../components/pedidos";
+import { Controller, useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  assignResponsibleSchema,
+  cancelOrderSchema,
+  paymentSchema,
+  type AssignResponsibleFormValues,
+  type CancelOrderFormValues,
+  type PaymentFormInputValues,
+  type PaymentFormValues,
+} from "../validation/forms";
 
 const defaultEmployees: string[] = [];
 
@@ -29,6 +40,8 @@ export default function Pedidos() {
   const [sortBy, setSortBy] = useState("DateDesc"); // DateDesc, DateAsc
   const [selectedOrderForPrint, setSelectedOrderForPrint] =
     useState<OrderItem | null>(null);
+  const [isGeneratingPrintNote, setIsGeneratingPrintNote] = useState(false);
+  const [printNoteError, setPrintNoteError] = useState<string | null>(null);
   const [selectedOrderForDetail, setSelectedOrderForDetail] =
     useState<OrderItem | null>(null);
   const [detailPaymentHistory, setDetailPaymentHistory] = useState<OrderPaymentRow[]>([]);
@@ -37,12 +50,8 @@ export default function Pedidos() {
   // Assignment Modal State
   const [editingResponsibleOrder, setEditingResponsibleOrder] =
     useState<OrderItem | null>(null);
-  const [selectedEmployee, setSelectedEmployee] = useState("");
-  const [customEmployeeName, setCustomEmployeeName] = useState("");
   const [paymentOrder, setPaymentOrder] = useState<OrderItem | null>(null);
-  const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentRate, setPaymentRate] = useState("");
-  const [paymentNote, setPaymentNote] = useState("");
   const [paymentHistory, setPaymentHistory] = useState<OrderPaymentRow[]>([]);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [isSavingPayment, setIsSavingPayment] = useState(false);
@@ -53,9 +62,33 @@ export default function Pedidos() {
   const [withdrawalError, setWithdrawalError] = useState<string | null>(null);
   const [isSavingWithdrawal, setIsSavingWithdrawal] = useState(false);
   const [cancelOrderTarget, setCancelOrderTarget] = useState<OrderItem | null>(null);
-  const [cancelReason, setCancelReason] = useState("");
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [isCancelingOrder, setIsCancelingOrder] = useState(false);
+
+  const paymentForm = useForm<PaymentFormInputValues, unknown, PaymentFormValues>({
+    resolver: zodResolver(paymentSchema),
+    defaultValues: {
+      amount: 0,
+      note: "",
+    },
+  });
+
+  const cancelForm = useForm<CancelOrderFormValues>({
+    resolver: zodResolver(cancelOrderSchema),
+    defaultValues: {
+      reason: "",
+    },
+  });
+
+  const assignForm = useForm<AssignResponsibleFormValues>({
+    resolver: zodResolver(assignResponsibleSchema),
+    defaultValues: {
+      selectedEmployee: "",
+      customEmployeeName: "",
+    },
+  });
+
+  const selectedEmployee = assignForm.watch("selectedEmployee");
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -97,29 +130,68 @@ export default function Pedidos() {
     setDetailWithdrawalHistory([]);
   };
 
+  const handleGeneratePrintNote = async () => {
+    if (!selectedOrderForPrint) return;
+
+    setIsGeneratingPrintNote(true);
+    setPrintNoteError(null);
+    try {
+      const result = await window.database.printOrderNote({
+        code: selectedOrderForPrint.code,
+        entryDate: selectedOrderForPrint.entryDate,
+        clientName: selectedOrderForPrint.clientName,
+        clientLastName: selectedOrderForPrint.clientLastName,
+        clientCI: selectedOrderForPrint.clientCI,
+        clientPhone: selectedOrderForPrint.clientPhone,
+        clientAddress: selectedOrderForPrint.clientAddress,
+        engineModel: selectedOrderForPrint.engineModel,
+        createdBy: selectedOrderForPrint.createdBy,
+        paymentStatus: selectedOrderForPrint.paymentStatus,
+        totalUSD: Number(selectedOrderForPrint.totalUSD || 0),
+        paidUSD: Number(getOrderPaidUSD(selectedOrderForPrint) || 0),
+        balanceUSD: Number(getOrderBalanceUSD(selectedOrderForPrint) || 0),
+        parts: selectedOrderForPrint.parts,
+        services: selectedOrderForPrint.services,
+        inventoryItems: selectedOrderForPrint.inventoryItems,
+      });
+
+      if (!result?.ok) {
+        throw new Error(result?.error || "No fue posible generar el PDF.");
+      }
+    } catch (error) {
+      setPrintNoteError(
+        error instanceof Error
+          ? error.message
+          : "No fue posible generar la nota imprimible.",
+      );
+    } finally {
+      setIsGeneratingPrintNote(false);
+    }
+  };
+
+  const openPrintPreview = (order: OrderItem) => {
+    setPrintNoteError(null);
+    setSelectedOrderForPrint(order);
+  };
+
   const openCancelOrderModal = (order: OrderItem) => {
     setCancelOrderTarget(order);
-    setCancelReason("");
+    cancelForm.reset({ reason: "" });
     setCancelError(null);
     setIsCancelingOrder(false);
   };
 
   const closeCancelOrderModal = () => {
     setCancelOrderTarget(null);
-    setCancelReason("");
+    cancelForm.reset({ reason: "" });
     setCancelError(null);
     setIsCancelingOrder(false);
   };
 
-  const handleCancelOrder = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCancelOrder = async (values: CancelOrderFormValues) => {
     if (!cancelOrderTarget) return;
 
-    const reason = cancelReason.trim();
-    if (!reason) {
-      setCancelError("Debes indicar el motivo de cancelación.");
-      return;
-    }
+    const reason = values.reason.trim();
 
     setIsCancelingOrder(true);
     setCancelError(null);
@@ -164,8 +236,7 @@ export default function Pedidos() {
 
   const openPaymentModal = async (order: OrderItem) => {
     setPaymentOrder(order);
-    setPaymentAmount("");
-    setPaymentNote("");
+    paymentForm.reset({ amount: 0, note: "" });
     setPaymentError(null);
 
     try {
@@ -189,8 +260,7 @@ export default function Pedidos() {
 
   const closePaymentModal = () => {
     setPaymentOrder(null);
-    setPaymentAmount("");
-    setPaymentNote("");
+    paymentForm.reset({ amount: 0, note: "" });
     setPaymentHistory([]);
     setPaymentError(null);
     setIsSavingPayment(false);
@@ -309,15 +379,10 @@ export default function Pedidos() {
     }
   };
 
-  const handleRegisterPayment = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleRegisterPayment = async (values: PaymentFormValues) => {
     if (!paymentOrder) return;
 
-    const amount = Number(paymentAmount.replace(",", "."));
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setPaymentError("Ingresa un monto de pago válido.");
-      return;
-    }
+    const amount = Number(values.amount);
 
     const balanceUSD = getOrderBalanceUSD(paymentOrder);
     const paymentUsdEquivalent = amount;
@@ -337,7 +402,7 @@ export default function Pedidos() {
         payment: {
           currency: "USD",
           amount,
-          note: paymentNote,
+          note: values.note || "",
         },
       });
       loadOrders();
@@ -361,18 +426,16 @@ export default function Pedidos() {
     loadOrders();
   }, []);
 
-  const handleAssignResponsible = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAssignResponsible = (values: AssignResponsibleFormValues) => {
     if (!editingResponsibleOrder) return;
     if ((editingResponsibleOrder.orderStatus || "Ingresado") === "Cancelada") {
       return;
     }
-    if (selectedEmployee === "custom" && !customEmployeeName.trim()) {
-      return;
-    }
 
     const finalName =
-      selectedEmployee === "custom" ? customEmployeeName : selectedEmployee;
+      values.selectedEmployee === "custom"
+        ? values.customEmployeeName?.trim() || ""
+        : values.selectedEmployee;
 
     const updatedOrder: OrderItem = {
       ...editingResponsibleOrder,
@@ -387,8 +450,7 @@ export default function Pedidos() {
           setSelectedOrderForDetail(updatedOrder);
         }
         setEditingResponsibleOrder(null);
-        setSelectedEmployee("");
-        setCustomEmployeeName("");
+        assignForm.reset({ selectedEmployee: "", customEmployeeName: "" });
       })
       .catch(console.error);
   };
@@ -484,7 +546,7 @@ export default function Pedidos() {
         <PedidosTable
           orders={paginatedOrders}
           onOpenOrderDetail={openOrderDetail}
-          onOpenPrint={(order) => setSelectedOrderForPrint(order)}
+          onOpenPrint={openPrintPreview}
           onOpenCancel={openCancelOrderModal}
           getOrderPaidUSD={getOrderPaidUSD}
           getOrderBalanceUSD={getOrderBalanceUSD}
@@ -508,23 +570,23 @@ export default function Pedidos() {
         onAssignResponsible={(order) => {
           if ((order.orderStatus || "Ingresado") === "Cancelada") return;
           setEditingResponsibleOrder(order);
-          setSelectedEmployee(
+          assignForm.reset({
+            selectedEmployee:
             order.responsible
               ? defaultEmployees.includes(order.responsible)
                 ? order.responsible
                 : "custom"
               : "",
-          );
-          setCustomEmployeeName(
+            customEmployeeName:
             order.responsible && !defaultEmployees.includes(order.responsible)
               ? order.responsible
               : "",
-          );
+          });
         }}
         onOpenPayment={openPaymentModal}
         onOpenWithdrawal={openWithdrawalModal}
         onOpenCancel={openCancelOrderModal}
-        onOpenPrint={(order) => setSelectedOrderForPrint(order)}
+        onOpenPrint={openPrintPreview}
         getOrderPaidUSD={getOrderPaidUSD}
         getOrderBalanceUSD={getOrderBalanceUSD}
         getPartDisplayName={getPartDisplayName}
@@ -551,22 +613,29 @@ export default function Pedidos() {
 
             {/* Bloque de Impresión Principal */}
             <div className="space-y-6 text-gray-800 print:text-black">
+              {printNoteError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/30 dark:bg-red-950/30 dark:text-red-300 print:hidden">
+                  {printNoteError}
+                </div>
+              )}
+
               {/* Encabezado Factura */}
               <div className="flex justify-between items-start border-b border-gray-200 pb-5 gap-4">
                 <div className="flex items-start gap-4">
-                  <div className="h-16 w-16 shrink-0 rounded-md border border-dashed border-gray-300 text-[10px] text-gray-500 flex items-center justify-center text-center px-1">
-                    Espacio
-                    para logo
-                  </div>
+                  <img
+                    className="h-16 w-auto shrink-0 object-contain"
+                    src="/images/logo/logo.png"
+                    alt="Rectificadora Bruno C.A"
+                  />
                   <div>
                     <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-brand-600 leading-tight">
-                      Rectificadora Bruno Aponte C.A
+                      Rectificadora Bruno C.A
                     </h2>
                     <p className="text-xs text-gray-600 mt-1 font-semibold">
                       RIF: J-507200914
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      Cuidado y precision para su motor
+                      Cuidado y precisión para su motor
                     </p>
                   </div>
                 </div>
@@ -745,11 +814,24 @@ export default function Pedidos() {
 
             {/* Botones de acción */}
             <div className="mt-8 flex justify-end gap-3 print:hidden">
-              <Button type="button" variant="outline" size="sm" onClick={() => setSelectedOrderForPrint(null)}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setPrintNoteError(null);
+                  setSelectedOrderForPrint(null);
+                }}
+              >
                 Cerrar
               </Button>
-              <Button type="button" size="sm" onClick={() => window.print()}>
-                Imprimir Nota
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleGeneratePrintNote}
+                disabled={isGeneratingPrintNote}
+              >
+                {isGeneratingPrintNote ? "Generando PDF..." : "Generar PDF de Nota"}
               </Button>
             </div>
           </div>
@@ -789,35 +871,53 @@ export default function Pedidos() {
               </div>
             )}
 
-            <form onSubmit={handleRegisterPayment} className="space-y-4">
+            <form onSubmit={paymentForm.handleSubmit(handleRegisterPayment)} className="space-y-4">
               <div>
                 <Label htmlFor="payment-amount">Monto abonado (USD)</Label>
-                <Input
-                  id="payment-amount"
-                  type="number"
-                  min="0"
-                  step={0.01}
-                  value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
-                  className="h-10"
+                <Controller
+                  control={paymentForm.control}
+                  name="amount"
+                  render={({ field }) => (
+                    <Input
+                      id="payment-amount"
+                      name={field.name}
+                      type="number"
+                      min="0"
+                      step={0.01}
+                      value={typeof field.value === "number" ? field.value : Number(field.value || 0)}
+                      onChange={field.onChange}
+                      className="h-10"
+                      error={Boolean(paymentForm.formState.errors.amount)}
+                      hint={paymentForm.formState.errors.amount?.message}
+                    />
+                  )}
                 />
               </div>
 
-              {paymentRate && paymentAmount ? (
+              {paymentRate && paymentForm.watch("amount") ? (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Referencia del día: Bs. {(Number(paymentAmount || 0) * Number(paymentRate || 0)).toFixed(2)} VES
+                  Referencia del día: Bs. {(Number(paymentForm.watch("amount") || 0) * Number(paymentRate || 0)).toFixed(2)} VES
                 </p>
               ) : null}
 
               <div>
                 <Label htmlFor="payment-note">Nota (opcional)</Label>
-                <Input
-                  id="payment-note"
-                  type="text"
-                  value={paymentNote}
-                  onChange={(e) => setPaymentNote(e.target.value)}
-                  placeholder="Referencia de pago"
-                  className="h-10"
+                <Controller
+                  control={paymentForm.control}
+                  name="note"
+                  render={({ field }) => (
+                    <Input
+                      id="payment-note"
+                      name={field.name}
+                      type="text"
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      placeholder="Referencia de pago"
+                      className="h-10"
+                      error={Boolean(paymentForm.formState.errors.note)}
+                      hint={paymentForm.formState.errors.note?.message}
+                    />
+                  )}
                 />
               </div>
 
@@ -873,15 +973,17 @@ export default function Pedidos() {
               </div>
             )}
 
-            <form onSubmit={handleCancelOrder} className="space-y-4">
+            <form onSubmit={cancelForm.handleSubmit(handleCancelOrder)} className="space-y-4">
               <div>
                 <Label htmlFor="cancel-reason">Motivo de cancelación</Label>
                 <TextArea
-                  value={cancelReason}
-                  onChange={setCancelReason}
+                  value={cancelForm.watch("reason")}
+                  onChange={(value) => cancelForm.setValue("reason", value, { shouldValidate: true })}
                   rows={4}
                   placeholder="Ej. Cliente desistió del servicio"
                   className="text-sm"
+                  error={Boolean(cancelForm.formState.errors.reason)}
+                  hint={cancelForm.formState.errors.reason?.message}
                 />
               </div>
 
@@ -1038,7 +1140,7 @@ export default function Pedidos() {
               </button>
             </div>
 
-            <form onSubmit={handleAssignResponsible} className="space-y-4">
+            <form onSubmit={assignForm.handleSubmit(handleAssignResponsible)} className="space-y-4">
               <div>
                 <Label>Seleccionar Responsable / Empleado</Label>
                 <Select
@@ -1048,21 +1150,33 @@ export default function Pedidos() {
                     { value: "custom", label: "Otro (Ingresar nombre personalizado)..." },
                   ]}
                   value={selectedEmployee}
-                  onChange={setSelectedEmployee}
+                  onChange={(value) => assignForm.setValue("selectedEmployee", value, { shouldValidate: true })}
                   className="h-10"
                 />
+                {assignForm.formState.errors.selectedEmployee && (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">{assignForm.formState.errors.selectedEmployee.message}</p>
+                )}
               </div>
 
               {selectedEmployee === "custom" && (
                 <div>
                   <Label htmlFor="custom-responsible">Nombre del Responsable</Label>
-                  <Input
-                    id="custom-responsible"
-                    type="text"
-                    value={customEmployeeName}
-                    onChange={(e) => setCustomEmployeeName(e.target.value)}
-                    placeholder="Ej. Roberto Gómez"
-                    className="h-10"
+                  <Controller
+                    control={assignForm.control}
+                    name="customEmployeeName"
+                    render={({ field }) => (
+                      <Input
+                        id="custom-responsible"
+                        name={field.name}
+                        type="text"
+                        value={field.value || ""}
+                        onChange={field.onChange}
+                        placeholder="Ej. Roberto Gómez"
+                        className="h-10"
+                        error={Boolean(assignForm.formState.errors.customEmployeeName)}
+                        hint={assignForm.formState.errors.customEmployeeName?.message}
+                      />
+                    )}
                   />
                 </div>
               )}
@@ -1079,35 +1193,6 @@ export default function Pedidos() {
           </div>
         </div>
       )}
-
-      {/* Estilos adicionales para ocultar elementos al imprimir */}
-      <style>{`
-        @media print {
-          body * {
-            visibility: hidden;
-          }
-          .print\\:block, .print\\:block * {
-            visibility: visible;
-          }
-          div[class*="fixed"] {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            background: white !important;
-            box-shadow: none !important;
-            border: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-          }
-          div[class*="fixed"] * {
-            visibility: visible;
-          }
-          .print\\:hidden {
-            display: none !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }

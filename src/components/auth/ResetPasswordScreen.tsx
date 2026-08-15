@@ -1,30 +1,35 @@
 import React, { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useAuth } from "../../hooks/useAuth";
+import {
+  resetPasswordSchema,
+  type ResetPasswordFormValues,
+} from "../../validation/forms";
 
 export const ResetPasswordScreen: React.FC = () => {
   const { changePassword, signOut } = useAuth();
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<ResetPasswordFormValues>({
+    resolver: zodResolver(resetPasswordSchema),
+    defaultValues: {
+      newPassword: "",
+      confirmPassword: "",
+    },
+  });
+
+  const onSubmit = async (values: ResetPasswordFormValues) => {
     setError(null);
-
-    if (newPassword.length < 8) {
-      setError("La contraseña debe tener al menos 8 caracteres.");
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setError("Las contraseñas no coinciden.");
-      return;
-    }
 
     setIsSubmitting(true);
     try {
-      await changePassword(newPassword);
+      await changePassword(values.newPassword);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error al actualizar la contraseña.";
       setError(msg);
@@ -56,7 +61,7 @@ export const ResetPasswordScreen: React.FC = () => {
           </div>
         )}
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+        <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
           <div className="space-y-4 rounded-md shadow-sm">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -64,12 +69,13 @@ export const ResetPasswordScreen: React.FC = () => {
               </label>
               <input
                 type="password"
-                required
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
+                {...register("newPassword")}
                 placeholder="Mínimo 8 caracteres"
                 className="relative block w-full appearance-none rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 focus:z-10 focus:border-brand-500 focus:outline-none focus:ring-brand-500 dark:border-gray-800 dark:bg-gray-900 dark:text-white sm:text-sm"
               />
+              {errors.newPassword && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.newPassword.message}</p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -77,12 +83,13 @@ export const ResetPasswordScreen: React.FC = () => {
               </label>
               <input
                 type="password"
-                required
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                {...register("confirmPassword")}
                 placeholder="Repite la contraseña"
                 className="relative block w-full appearance-none rounded-lg border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 focus:z-10 focus:border-brand-500 focus:outline-none focus:ring-brand-500 dark:border-gray-800 dark:bg-gray-900 dark:text-white sm:text-sm"
               />
+              {errors.confirmPassword && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.confirmPassword.message}</p>
+              )}
             </div>
           </div>
 

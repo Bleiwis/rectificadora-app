@@ -6,6 +6,12 @@ import Input from "../form/input/InputField";
 import Checkbox from "../form/input/Checkbox";
 import Button from "../ui/button/Button";
 import { useAuth } from "../../hooks/useAuth";
+import {
+  serverConnectionSchema,
+  signInPasswordSchema,
+  signInSetupPasswordSchema,
+  signInUsernameSchema,
+} from "../../validation/forms";
 
 type SignInStep = "server" | "username" | "password" | "setup-password";
 
@@ -194,11 +200,20 @@ export default function SignInFormDesktop() {
   };
 
   const handleConnectServer = async () => {
-    const host = serverHost.trim();
-    if (!host) {
-      setErrorMessage("Debes indicar la IP o hostname del servidor.");
+    const serverValidation = serverConnectionSchema.safeParse({
+      serverHost,
+      serverPort,
+      serverToken,
+    });
+
+    if (!serverValidation.success) {
+      setErrorMessage(
+        serverValidation.error.issues[0]?.message ||
+          "Debes indicar la IP o hostname del servidor.",
+      );
       return;
     }
+    const host = serverValidation.data.serverHost.trim();
 
     setErrorMessage(null);
     try {
@@ -229,11 +244,14 @@ export default function SignInFormDesktop() {
   };
 
   const handleValidateUsername = async () => {
-    const usernameValue = username.trim();
-    if (!usernameValue) {
-      setErrorMessage("Debes ingresar un usuario.");
+    const usernameValidation = signInUsernameSchema.safeParse({ username });
+    if (!usernameValidation.success) {
+      setErrorMessage(
+        usernameValidation.error.issues[0]?.message || "Debes ingresar un usuario.",
+      );
       return;
     }
+    const usernameValue = usernameValidation.data.username.trim();
 
     const result = await checkUsername(usernameValue);
     if (!result.exists) {
@@ -255,18 +273,25 @@ export default function SignInFormDesktop() {
   };
 
   const handleSignInWithPassword = async () => {
+    const passwordValidation = signInPasswordSchema.safeParse({ password });
+    if (!passwordValidation.success) {
+      setErrorMessage(
+        passwordValidation.error.issues[0]?.message || "Debes ingresar tu clave.",
+      );
+      return;
+    }
+
     await signIn({ username: username.trim(), password, rememberSession: isChecked });
     navigate("/");
   };
 
   const handleSetupInitialPassword = async () => {
-    if (newPassword.length < 8) {
-      setErrorMessage("La contrasena debe tener al menos 8 caracteres.");
-      return;
-    }
-
-    if (newPassword !== confirmNewPassword) {
-      setErrorMessage("Las contrasenas no coinciden.");
+    const setupValidation = signInSetupPasswordSchema.safeParse({
+      newPassword,
+      confirmNewPassword,
+    });
+    if (!setupValidation.success) {
+      setErrorMessage(setupValidation.error.issues[0]?.message || "Datos inválidos.");
       return;
     }
 

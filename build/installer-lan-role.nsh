@@ -32,6 +32,26 @@
   Sleep 1200
 !macroend
 
+!macro customRemoveFiles
+  MessageBox MB_YESNO|MB_ICONQUESTION "Deseas borrar tambien todos los datos locales de la aplicacion (base de datos, usuarios y registro de licencia)?$\r$\n$\r$\n- Selecciona SI para eliminar por completo la base de datos y la licencia local.$\r$\n- Selecciona NO para conservar tus datos en el equipo." IDYES wipe_data IDNO keep_data
+
+wipe_data:
+  RMDir /r /REBOOTOK "$APPDATA\Rectificadora App"
+  RMDir /r /REBOOTOK "$APPDATA\${APP_FILENAME}"
+  RMDir /r /REBOOTOK "$APPDATA\tailadmin-react"
+  RMDir /r /REBOOTOK "$LOCALAPPDATA\${APP_FILENAME}"
+  RMDir /r /REBOOTOK "$LOCALAPPDATA\Rectificadora App"
+  RMDir /r /REBOOTOK "$LOCALAPPDATA\tailadmin-react"
+  Goto done_remove
+
+keep_data:
+  FileOpen $0 "$TEMP\rectificadora-installer.log" a
+  FileWrite $0 "[customRemoveFiles] user chose to keep local data$\r$\n"
+  FileClose $0
+
+done_remove:
+!macroend
+
 !ifndef BUILD_UNINSTALLER
 Var /GLOBAL InstallerDiagLog
 Var /GLOBAL InstallerDiagLogFallback

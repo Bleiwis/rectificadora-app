@@ -1,40 +1,50 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ChevronLeftIcon, EyeCloseIcon, EyeIcon } from "../../icons";
 import Label from "../form/Label";
 import Input from "../form/input/InputField";
 import Button from "../ui/button/Button";
 import { useAuth } from "../../hooks/useAuth";
+import { Controller, useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  setupMasterSchema,
+  type SetupMasterFormValues,
+} from "../../validation/forms";
 
 export default function SetupMasterFormDesktop() {
   const navigate = useNavigate();
   const { setupMasterUser, isDesktopAuthAvailable } = useAuth();
 
-  const [username, setUsername] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setErrorMessage(null);
+  const {
+    control,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<SetupMasterFormValues>({
+    resolver: zodResolver(setupMasterSchema),
+    defaultValues: {
+      username: "",
+      displayName: "",
+      password: "",
+      confirmPassword: "",
+    },
+  });
 
-    if (password !== confirmPassword) {
-      setErrorMessage("Las contrasenas no coinciden.");
-      return;
-    }
+  const onSubmit = async (values: SetupMasterFormValues) => {
+    setErrorMessage(null);
 
     setIsSubmitting(true);
 
     try {
       await setupMasterUser({
-        username,
-        displayName,
-        password,
+        username: values.username,
+        displayName: values.displayName || "",
+        password: values.password,
       });
       navigate("/", { replace: true });
     } catch (error) {
@@ -75,17 +85,26 @@ export default function SetupMasterFormDesktop() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit(onSubmit)}>
           <div className="space-y-5">
             <div>
               <Label>
                 Usuario Maestro <span className="text-error-500">*</span>
               </Label>
-              <Input
-                type="text"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                placeholder="admin"
+              <Controller
+                control={control}
+                name="username"
+                render={({ field }) => (
+                  <Input
+                    type="text"
+                    name={field.name}
+                    value={field.value}
+                    onChange={field.onChange}
+                    placeholder="admin"
+                    error={Boolean(errors.username)}
+                    hint={errors.username?.message}
+                  />
+                )}
               />
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Usa 3-32 caracteres. Permitidos: letras, numeros, punto, guion bajo y guion.
@@ -94,11 +113,20 @@ export default function SetupMasterFormDesktop() {
 
             <div>
               <Label>Nombre a mostrar (opcional)</Label>
-              <Input
-                type="text"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="Administrador"
+              <Controller
+                control={control}
+                name="displayName"
+                render={({ field }) => (
+                  <Input
+                    type="text"
+                    name={field.name}
+                    value={field.value || ""}
+                    onChange={field.onChange}
+                    placeholder="Administrador"
+                    error={Boolean(errors.displayName)}
+                    hint={errors.displayName?.message}
+                  />
+                )}
               />
             </div>
 
@@ -107,11 +135,20 @@ export default function SetupMasterFormDesktop() {
                 Clave <span className="text-error-500">*</span>
               </Label>
               <div className="relative">
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Ingresa tu clave"
+                <Controller
+                  control={control}
+                  name="password"
+                  render={({ field }) => (
+                    <Input
+                      type={showPassword ? "text" : "password"}
+                      name={field.name}
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder="Ingresa tu clave"
+                      error={Boolean(errors.password)}
+                      hint={errors.password?.message}
+                    />
+                  )}
                 />
                 <span
                   onClick={() => setShowPassword(!showPassword)}
@@ -131,11 +168,20 @@ export default function SetupMasterFormDesktop() {
                 Confirmar clave <span className="text-error-500">*</span>
               </Label>
               <div className="relative">
-                <Input
-                  type={showConfirmPassword ? "text" : "password"}
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  placeholder="Confirma tu clave"
+                <Controller
+                  control={control}
+                  name="confirmPassword"
+                  render={({ field }) => (
+                    <Input
+                      type={showConfirmPassword ? "text" : "password"}
+                      name={field.name}
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder="Confirma tu clave"
+                      error={Boolean(errors.confirmPassword)}
+                      hint={errors.confirmPassword?.message}
+                    />
+                  )}
                 />
                 <span
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}

@@ -122,6 +122,19 @@ type LanDiscoveredServer = {
   probeError?: string | null;
 };
 
+type CloudRestoreTableResult = {
+  restored: number;
+  status: "ok" | "skipped" | "failed";
+  error?: string;
+};
+
+type CloudRestoreResult = {
+  ok: boolean;
+  startedAt: string;
+  finishedAt: string | null;
+  tables: Record<string, CloudRestoreTableResult>;
+};
+
 type LocalNetworkIp = {
   interfaceName: string;
   family: "IPv4" | "IPv6" | string;
@@ -166,6 +179,7 @@ interface Window {
     findClientByDocument: (docNormalized: string) => Promise<{ id: string; docType: "V" | "J"; docNumber: string; docNormalized: string; firstName?: string; lastName?: string; phone?: string; address?: string; createdAt: string; updatedAt: string } | null>;
     upsertClient: (client: { id?: string; docType?: "V" | "J"; docNumber?: string; docNormalized?: string; firstName?: string; lastName?: string; phone?: string; address?: string }) => Promise<{ id: string; docType: "V" | "J"; docNumber: string; docNormalized: string; firstName?: string; lastName?: string; phone?: string; address?: string; createdAt: string; updatedAt: string }>;
     triggerSync: () => Promise<void>;
+    restoreFromCloud: (options?: { tables?: string[] }) => Promise<CloudRestoreResult>;
     getBcvUsdRate: () => Promise<BcvUsdRateSnapshot | null>;
     refreshBcvUsdRate: () => Promise<BcvUsdRateOperationResult>;
     getBcvUsdRateStatus: () => Promise<BcvUsdRateStatus>;
@@ -176,6 +190,24 @@ interface Window {
     discoverLanServers: () => Promise<LanDiscoveredServer[]>;
     probeLanServer: (payload: { host: string; port?: number; token?: string }) => Promise<{ reachable: boolean; error: string | null }>;
     getLocalNetworkIps: () => Promise<LocalNetworkIp[]>;
+    printOrderNote: (payload: {
+      code: string;
+      entryDate: string;
+      clientName: string;
+      clientLastName: string;
+      clientCI: string;
+      clientPhone: string;
+      clientAddress?: string;
+      engineModel: string;
+      createdBy: string;
+      paymentStatus: PaymentStatus;
+      totalUSD: number;
+      paidUSD: number;
+      balanceUSD: number;
+      parts: Array<{ partName: string; customName?: string; quantity: number; measurement: string }>;
+      services: Array<{ name: string; priceUSD: number }>;
+      inventoryItems?: Array<{ id: string; name: string; priceUSD: number; quantity: number }>;
+    }) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
   };
   license?: {
     getStatus: () => Promise<LicenseStatusPayload>;

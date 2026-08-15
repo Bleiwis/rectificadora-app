@@ -62,6 +62,15 @@ These instructions apply to any AI coding agent working in this repository (Copi
   - `npm run test` (if present)
   - `npm run build`
 
+## Regla Obligatoria de Trabajo bajo TDD
+- Todo cambio de lógica o corrección de bugs debe trabajarse bajo TDD (Test-Driven Development).
+- Flujo obligatorio: Red -> Green -> Refactor.
+  - Red: escribir primero una prueba que falle y capture el comportamiento esperado o el bug.
+  - Green: implementar el cambio mínimo para que la prueba pase.
+  - Refactor: limpiar y mejorar el código sin alterar el comportamiento validado por pruebas.
+- No se considera tarea terminada si no existe evidencia de pruebas que primero fallaron y luego pasaron (cuando técnicamente aplique).
+- Si TDD no aplica por una limitación técnica real, documentar explícitamente la razón y definir una estrategia de validación equivalente antes de cerrar la tarea.
+
 ## Design Patterns To Prefer
 - Feature-oriented modules for UI and domain boundaries.
 - Repository pattern for persistence access.

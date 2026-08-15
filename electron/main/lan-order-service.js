@@ -1,6 +1,7 @@
 import net from "node:net";
 import dgram from "node:dgram";
 import { orderCodeRepo, ordersRepo, servicesRepo, inventoryRepo } from "./db.js";
+import { getLicenseStatus, refreshLicense } from "./license-service.js";
 
 let tcpServer = null;
 let tcpServerConfig = null;
@@ -122,6 +123,63 @@ async function handleServerRequest(request, expectedToken) {
     return { id, ok: true, data: { status: "ok" } };
   }
 
+  if (type === "license:get-status") {
+    const status = getLicenseStatus();
+    return { id, ok: true, data: status };
+  }
+
+  if (type === "license:refresh") {
+    const status = await refreshLicense("lan-client-request");
+    return { id, ok: true, data: status };
+  }
+
+  if (type === "auth:bootstrap-state") {
+    const bootstrapState = authStoreRef ? authStoreRef.getBootstrapState() : { hasMasterUser: false };
+    return { id, ok: true, data: bootstrapState };
+  }
+
+  if (type === "auth:check-username") {
+    const username = request?.payload?.username;
+    if (typeof username !== "string" || !username.trim()) {
+      return { id, ok: false, error: "Usuario invalido." };
+    }
+    const status = authStoreRef ? authStoreRef.getSignInState(username) : { exists: false, hasPassword: false, isActive: false, requiresPasswordReset: false };
+    return { id, ok: true, data: status };
+  }
+
+  if (type === "auth:sign-in") {
+    if (!authStoreRef) {
+      return { id, ok: false, error: "Auth store no disponible en el servidor LAN." };
+    }
+    const user = authStoreRef.signIn(request?.payload ?? {});
+    return { id, ok: true, data: { user } };
+  }
+
+  if (type === "auth:set-initial-password") {
+    if (!authStoreRef) {
+      return { id, ok: false, error: "Auth store no disponible en el servidor LAN." };
+    }
+    const user = authStoreRef.setInitialPassword(request?.payload ?? {});
+    return { id, ok: true, data: { user } };
+  }
+
+  if (type === "auth:get-user-by-id") {
+    if (!authStoreRef) {
+      return { id, ok: false, error: "Auth store no disponible en el servidor LAN." };
+    }
+    const user = authStoreRef.getUserById(request?.payload?.userId);
+    return { id, ok: true, data: { user } };
+  }
+
+  if (type === "auth:force-reset-password") {
+    if (!authStoreRef) {
+      return { id, ok: false, error: "Auth store no disponible en el servidor LAN." };
+    }
+    authStoreRef.forceResetPassword(request?.payload?.userId, request?.payload?.newPassword);
+    const user = authStoreRef.getUserById(request?.payload?.userId);
+    return { id, ok: true, data: { user } };
+  }
+
   if (type === "order:get-next-code") {
     const code = orderCodeRepo.getNextCode();
     return { id, ok: true, data: { code } };
@@ -160,7 +218,10 @@ async function handleServerRequest(request, expectedToken) {
   return { id, ok: false, error: `Tipo de solicitud no soportado: ${type}` };
 }
 
-export function startLanOrderServer(config) {
+let authStoreRef = null;
+
+export function startLanOrderServer(config, authStore = null) {
+  authStoreRef = authStore;
   const host = String(config?.host || "0.0.0.0").trim() || "0.0.0.0";
   const port = Number(config?.port || 4510);
   const discoveryPort = Number(config?.discoveryPort || DEFAULT_DISCOVERY_PORT);
@@ -458,6 +519,99 @@ export async function getInventoryFromLan(config) {
   });
 
   return Array.isArray(data?.inventory) ? data.inventory : [];
+}
+
+export async function getBootstrapStateFromLan(config) {
+  const data = await requestLanServer({
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    type: "auth:bootstrap-state",
+    timeoutMs: 3000,
+  });
+  return data || { hasMasterUser: false };
+}
+
+export async function checkUsernameFromLan(config, username) {
+  const data = await requestLanServer({
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    type: "auth:check-username",
+    payload: { username },
+    timeoutMs: 3000,
+  });
+  return data || { exists: false, hasPassword: false, isActive: false, requiresPasswordReset: false };
+}
+
+export async function signInFromLan(config, payload) {
+  const data = await requestLanServer({
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    type: "auth:sign-in",
+    payload,
+    timeoutMs: 5000,
+  });
+  return data?.user || null;
+}
+
+export async function setInitialPasswordFromLan(config, payload) {
+  const data = await requestLanServer({
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    type: "auth:set-initial-password",
+    payload,
+    timeoutMs: 5000,
+  });
+  return data?.user || null;
+}
+
+export async function getUserByIdFromLan(config, userId) {
+  const data = await requestLanServer({
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    type: "auth:get-user-by-id",
+    payload: { userId },
+    timeoutMs: 3000,
+  });
+  return data?.user || null;
+}
+
+export async function forceResetPasswordFromLan(config, userId, newPassword) {
+  const data = await requestLanServer({
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    type: "auth:force-reset-password",
+    payload: { userId, newPassword },
+    timeoutMs: 5000,
+  });
+  return data?.user || null;
+}
+
+export async function getLicenseStatusFromLan(config) {
+  const data = await requestLanServer({
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    type: "license:get-status",
+    timeoutMs: 4000,
+  });
+  return data || null;
+}
+
+export async function refreshLicenseFromLan(config) {
+  const data = await requestLanServer({
+    host: config.host,
+    port: config.port,
+    token: config.token,
+    type: "license:refresh",
+    timeoutMs: 6000,
+  });
+  return data || null;
 }
 
 export async function discoverLanServers(options = {}) {
