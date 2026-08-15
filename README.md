@@ -1,254 +1,224 @@
-# TailAdmin React - Free React Tailwind Admin Dashboard Template
+# Rectificadora App
 
-TailAdmin is a free and open-source admin dashboard template built on **React and Tailwind CSS**, providing developers
-with everything they need to create a comprehensive, data-driven back-end,
-dashboard, or admin panel solution for upcoming web projects.
+Aplicación de escritorio para la gestión operativa de un taller rectificador, construida con Electron + React y orientada a trabajo offline-first.
 
-With TailAdmin, you get access to all the necessary dashboard UI components, elements, and pages required to build a
-feature-rich and complete dashboard or admin panel. Whether you're building dashboard or admin panel for a complex web
-application or a simple website, TailAdmin is the perfect solution to help you get up and running quickly.
+Su objetivo principal es permitir que el negocio siga operando incluso sin conexión, con persistencia local robusta y sincronización remota asíncrona cuando la red está disponible.
 
-![TailAdmin React.js Dashboard Preview](./banner.png)
+## Propósito del proyecto
 
-## Overview
+Este sistema centraliza flujos clave del taller:
 
-TailAdmin provides essential UI components and layouts for building feature-rich, data-driven admin dashboards and
-control panels. It's built on:
+- Registro y seguimiento de pedidos/órdenes.
+- Gestión de servicios y precios.
+- Gestión de inventario/repuestos.
+- Control de usuarios con roles (master, administrador, caja).
+- Operación local estable con cola de sincronización hacia Supabase.
+
+El enfoque del diseño privilegia continuidad operativa local, trazabilidad de cambios y seguridad en la separación de procesos de Electron.
+
+## Características principales
+
+- Arquitectura desktop con Electron.
+- Persistencia local en SQLite (fuente de verdad primaria).
+- Patrón outbox para sincronización diferida y tolerante a fallos.
+- Sincronización remota con reintentos/backoff.
+- Bridge seguro de IPC vía preload.
+- Autenticación local con hash de contraseñas y gestión de sesiones por rol.
+- Soporte de operación LAN (modo standalone/server/client).
+
+## Arquitectura (alto nivel)
+
+```mermaid
+flowchart LR
+	UI[Renderer React] -->|IPC tipado| PRELOAD[Preload Bridge]
+	PRELOAD --> MAIN[Electron Main Process]
+	MAIN --> DB[(SQLite local)]
+	MAIN --> OUTBOX[(sync_outbox)]
+	OUTBOX --> SYNC[Sync Worker]
+	SYNC --> SUPABASE[(Supabase)]
+```
+
+### Principios técnicos aplicados
+
+- Local-first: lecturas y escrituras primarias contra SQLite.
+- Sync no bloqueante: la red no detiene el flujo operativo del usuario.
+- IPC como frontera de seguridad: el renderer no accede directamente a APIs de Node.
+- Separación clara de capas:
+	- main: lifecycle, servicios nativos, persistencia y sync.
+	- preload: API segura para renderer.
+	- renderer: UI y experiencia de usuario.
+
+## Stack tecnológico
+
+### Frontend
 
 - React 19
 - TypeScript
-- Tailwind CSS v4
+- Vite 6
+- Tailwind CSS 4
+- React Router 7
 
-### Quick Links
+### Desktop y backend local
 
-- [✨ Visit Website](https://tailadmin.com)
-- [📄 Documentation](https://tailadmin.com/docs)
-- [⬇️ Download](https://tailadmin.com/download)
-- [🖌️ Figma Design File (Community Edition)](https://www.figma.com/community/file/1214477970819985778)
-- [⚡ Get PRO Version](https://tailadmin.com/pricing)
+- Electron 43
+- SQLite (`better-sqlite3`)
+- IPC tipado y validado en fronteras críticas
 
-### Demos
+### Calidad y tooling
 
-- [Free Version](https://free-react-demo.tailadmin.com/)
-- [Pro Version](https://react-demo.tailadmin.com)
+- ESLint 9
+- Vitest 4
+- electron-builder
 
-### Other Versions
+## Estructura del repositorio
 
-- [HTML Version](https://github.com/TailAdmin/tailadmin-free-tailwind-dashboard-template)
-- [Next.js Version](https://github.com/TailAdmin/free-nextjs-admin-dashboard)
-- [Vue.js Version](https://github.com/TailAdmin/vue-tailwind-admin-dashboard)
-- [Angular Version](https://github.com/TailAdmin/free-angular-tailwind-dashboard)
-- [Laravel Version](https://github.com/TailAdmin/tailadmin-laravel)
+```text
+electron/
+	main/       # Persistencia, servicios de sync/licencia, handlers IPC, runtime desktop
+	preload/    # Bridge seguro renderer <-> main
+	shared/     # Constantes y contratos compartidos (canales, tipos, etc.)
 
-## Installation
+src/
+	components/ # Componentes de UI
+	context/    # Context providers del frontend
+	hooks/      # Hooks de dominio/UI
+	layout/     # Estructura principal de pantallas
+	pages/      # Pantallas de la aplicación
 
-### Prerequisites
-
-To get started with TailAdmin, ensure you have the following prerequisites installed and set up:
-
-- Node.js 18.x or later (recommended to use Node.js 20.x or later)
-
-### Cloning the Repository
-
-Clone the repository using the following command:
-
-```bash
-git clone https://github.com/TailAdmin/free-react-tailwind-admin-dashboard.git
+tests/        # Pruebas unitarias/integración de servicios locales
+scripts/      # Automatización de build/versionado/puertos
+docs/         # Documentación técnica y SQL de sincronización
 ```
 
-> Windows Users: place the repository near the root of your drive if you face issues while cloning.
+## Requisitos
 
-1. Install dependencies:
+- Node.js 20+ (recomendado LTS actual)
+- npm 10+
+- Windows (objetivo principal de despliegue)
 
-   ```bash
-   npm install
-   # or
-   yarn install
-   ```
+## Instalación
 
-2. Start the development server:
-   ```bash
-   npm run dev
-   # or
-   yarn dev
-   ```
+```bash
+npm install
+```
 
-## Desktop (Electron) Mode
+## Ejecución en desarrollo
 
-This repository now supports Electron desktop execution with local authentication.
+### Solo web (Vite)
 
-- Run desktop in development:
+```bash
+npm run dev:web
+```
 
-   ```bash
-   npm run dev:desktop
-   ```
+### Desktop completo (Electron + Vite)
 
-- Build web assets:
+```bash
+npm run dev:desktop
+```
 
-   ```bash
-   npm run build:web
-   ```
+## Scripts disponibles
 
-- Build desktop installers:
+| Comando | Descripción |
+|---|---|
+| `npm run dev` | Alias de `dev:web`. |
+| `npm run dev:web` | Levanta frontend con Vite en `127.0.0.1:5173`. |
+| `npm run dev:desktop` | Levanta entorno desktop de desarrollo (Vite + Electron). |
+| `npm run build` | Build web (`tsc -b` + `vite build`). |
+| `npm run build:desktop` | Build web + empaquetado Electron. |
+| `npm run build:windows` | Flujo de build para Windows usando script dedicado. |
+| `npm run lint` | Ejecuta ESLint. |
+| `npm run test` | Ejecuta Vitest. |
+| `npm run test:coverage` | Ejecuta pruebas con reporte de cobertura. |
 
-   ```bash
-   npm run build:desktop
-   ```
+## Calidad y verificación recomendada
 
-### LAN Server/Client Mode (4-digit Order Code)
+Antes de cerrar cambios, ejecutar:
 
-- The app supports three LAN modes for order creation:
-   - `standalone`: local-only behavior
-   - `server`: central LAN authority for assigning 4-digit order code
-   - `client`: creates orders through server over local TCP/IP
-- In `client` mode, if the LAN server is unreachable, order creation is blocked to avoid duplicate 4-digit codes.
-- LAN settings are available at `/ajustes` for admin roles (`master`, `administrador`).
+```bash
+npm run lint
+npm run test
+npm run build
+```
 
-### Installer Role Selection (Windows NSIS)
+## Configuración de entorno
 
-- Windows NSIS installer now prompts role selection during install:
-   - `Yes` => `server`
-   - `No` => `client`
-   - `Cancel` => `standalone`
-- The installer writes bootstrap file to `%APPDATA%\\Rectificadora App\\installer-lan-config.txt`.
-- On first app run, Electron reads this file, persists LAN settings in SQLite runtime config, and then removes the bootstrap file.
+La app carga variables desde múltiples fuentes en runtime (incluyendo `.env` local y archivos runtime para instalación).
 
-### Local Auth Database
+Variables relevantes usadas por la aplicación:
 
-- The app creates a local SQLite database in Electron `userData` path.
-- On first run, the app requires creating a single master user before sign-in is enabled.
-- Sign-in uses username + password (no email required).
-- After master setup, the app signs in and opens the dashboard.
-- On app restart, session is revalidated and sign-in is required again.
-- Passwords are never stored in plain text; they are stored as salted `scrypt` hashes.
-- Sensitive profile fields are encrypted at rest using AES-256-GCM.
+### Operación y LAN
 
-## Components
+- `APP_DEPLOYMENT_MODE` (`standalone`, `server`, `client`)
+- `APP_LAN_HOST`
+- `APP_LAN_PORT`
+- `APP_LAN_TOKEN`
 
-TailAdmin is a pre-designed starting point for building a web-based dashboard using React.js and Tailwind CSS. The
-template includes:
+### Sincronización / Supabase
 
-- Sophisticated and accessible sidebar
-- Data visualization components
-- Prebuilt profile management and 404 page
-- Tables and Charts(Line and Bar)
-- Authentication forms and input elements
-- Alerts, Dropdowns, Modals, Buttons and more
-- FAQ & Accordion, Testimonials, and Carousels
-- Can't forget Dark Mode 🕶️
+- `SUPABASE_URL`
+- `SUPABASE_SECRET_KEY`
+- `SUPABASE_PUBLISHABLE_KEY`
 
-All components are built with React and styled using Tailwind CSS for easy customization.
+### Licenciamiento
 
-## Feature Comparison
+- `LICENSE_TABLE`
+- `LICENSE_PUBLIC_KEY`
+- `LICENSE_TRIAL_DAYS`
+- `LICENSE_ENFORCEMENT`
 
-### Free Version
+### Otros
 
-- 1 Unique Dashboard
-- 35+ dashboard components
-- 50+ UI elements
-- Basic Figma design files
-- Community support
+- `ORDER_CODE_PREFIX`
+- `VITE_DEV_SERVER_URL` (uso interno de entorno desktop dev)
 
-### Pro Version
+## Modelo de seguridad
 
-- 7 Unique Dashboards: Analytics, Ecommerce, Marketing, CRM, SaaS, Stocks, Logistics (more coming soon)
-- 500+ dashboard components and UI elements
-- Complete Figma design file
-- Email support
+La configuración de Electron está endurecida bajo principios mínimos:
 
-To learn more about pro version features and pricing, visit our [pricing page](https://tailadmin.com/pricing).
+- `contextIsolation: true`
+- `nodeIntegration: false`
+- `sandbox: true` (cuando aplica)
 
-## Changelog
+Además:
 
-### Version 2.3.0 - [April 28, 2026]
-- Added **AI Dashboard** with token usage and revenue tracking.
-- Added **Sales Dashboard** with retention and multi-channel analytics.
-- Added **Finance Dashboard** with cashflow and balance management.
-- Introduced **6 New Layout variations** for improved UI flexibility.
-- Integrated **Advanced Data Visualization** with 7+ new chart types.
+- El renderer no debe consumir APIs de Node directamente.
+- Las operaciones de datos pasan por handlers IPC en main.
+- La validación de payloads en handlers críticos evita entradas inválidas en persistencia.
 
-### Version 2.1.0 - [Dec 30, 2025]
+## Persistencia y sincronización
 
-- Resolved Date Picker positioning and input issues in Charts.
+- Base local SQLite como fuente de verdad.
+- Outbox persistente en disco para mutaciones pendientes.
+- Procesamiento asíncrono de outbox con reintentos y backoff.
+- Estados de sincronización y recuperación ante reconexión.
 
-### Version 2.0.2 - [March 25, 2025]
+## Estado de sensores AWM
 
-- Upgraded to React 19
-- Included overrides for packages to prevent peer dependency errors.
-- Migrated from react-flatpickr to flatpickr package for React 19 support
+Este repositorio integra AWM para gobernanza y flujo de trabajo asistido por agentes.
 
-### Version 2.0.1 - [February 27, 2025]
+En algunos entornos Windows, la certificación automática de sensores puede quedar en `probe-inconclusive`. Cuando eso ocurre, se usa opt-out deliberado en `.awm/sensors.json` para mantener `preflight` en estado `ready` y usar como gates efectivos `lint`, `test` y `build`.
 
-#### Update Overview
+Comandos útiles:
 
-- Upgraded to Tailwind CSS v4 for better performance and efficiency.
-- Updated class usage to match the latest syntax and features.
-- Replaced deprecated class and optimized styles.
+```bash
+awm doctor
+awm preflight --json
+awm sensors status
+```
 
-#### Next Steps
+## Documentación complementaria
 
-- Run npm install or yarn install to update dependencies.
-- Check for any style changes or compatibility issues.
-- Refer to the Tailwind CSS v4 [Migration Guide](https://tailwindcss.com/docs/upgrade-guide) on this release. if needed.
-- This update keeps the project up to date with the latest Tailwind improvements. 🚀
+- Plan histórico de migración offline-first: `docs/electron-offline-first-plan.md`
+- Scripts SQL de sincronización Supabase: `docs/supabase-sync-schema-*.sql`
 
-### Version 2.0.0 - [February 2025]
+## Notas para colaboradores
 
-A major update with comprehensive redesign and modern React patterns implementation.
+- Mantener cambios incrementales y enfocados.
+- Evitar refactors no relacionados con la tarea.
+- Preservar tipado estricto y validaciones en fronteras IPC.
+- Incluir pruebas para cambios de lógica no triviales.
 
-#### Major Improvements
+---
 
-- Complete UI redesign with modern React patterns
-- New features: collapsible sidebar, chat, and calendar
-- Improved performance and accessibility
-- Updated data visualization using ApexCharts
+Si quieres, también puedo generar una versión corta de este README orientada a usuarios finales (operación), y dejar esta como documentación técnica para desarrollo.
 
-#### Key Features
-
-- Redesigned dashboards (Ecommerce, Analytics, Marketing, CRM)
-- Enhanced navigation with React Router integration
-- Advanced tables with sorting and filtering
-- Calendar with drag-and-drop support
-- New UI components and improved existing ones
-
-#### Breaking Changes
-
-- Updated sidebar component API
-- Migrated charts to ApexCharts
-- Revised authentication system
-
-[Read more](https://tailadmin.com/docs/update-logs/react) on this release.
-
-### Version 1.3.7 - [June 20, 2024]
-
-#### Enhancements
-
-1. Remove Repetition of DefaultLayout in every Pages
-2. Add ClickOutside Component for reduce repeated functionality in Header Message, Notification and User Dropdowns.
-
-### Version 1.3.6 - [Jan 31, 2024]
-
-#### Enhancements
-
-1. Integrate flatpickr in [Date Picker/Form Elements]
-2. Change color after select an option [Select Element/Form Elements].
-3. Make it functional [Multiselect Dropdown/Form Elements].
-4. Make best value editable [Pricing Table One/Pricing Table].
-5. Rearrange Folder structure.
-
-### Version 1.2.0 - [Apr 28, 2023]
-
-- Add Typescript in TailAdmin React.
-
-### Version 1.0.0 - Initial Release - [Mar 13, 2023]
-
-- Initial release of TailAdmin React.
-
-## License
-
-TailAdmin React.js Free Version is released under the MIT License.
-
-## Support
-
-If you find this project helpful, please consider giving it a star on GitHub. Your support helps us continue developing
-and maintaining this template.
