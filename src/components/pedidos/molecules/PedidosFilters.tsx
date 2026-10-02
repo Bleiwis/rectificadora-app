@@ -45,19 +45,19 @@ export default function PedidosFilters({
   processedCount,
 }: PedidosFiltersProps) {
   return (
-    <div className="mb-6 overflow-x-auto">
-      <div className="flex min-w-[980px] flex-nowrap items-center gap-3">
-        <div className="relative w-[320px] shrink-0">
+    <div className="mb-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[240px] max-w-sm">
           <Input
             type="text"
-            placeholder="Buscar por No, cliente, cedula..."
+            placeholder="Buscar por Nº, cliente, cédula..."
             value={searchTerm}
             onChange={(e) => onSearchTermChange(e.target.value)}
             className="h-10"
           />
         </div>
 
-        <div className="w-[220px] shrink-0">
+        <div className="w-48 sm:w-52">
           <Select
             options={paymentFilterOptions}
             value={filterPayment}
@@ -67,7 +67,7 @@ export default function PedidosFilters({
           />
         </div>
 
-        <div className="w-[220px] shrink-0">
+        <div className="w-52 sm:w-56">
           <Select
             options={orderStatusFilterOptions}
             value={filterOrderStatus}
@@ -77,7 +77,7 @@ export default function PedidosFilters({
           />
         </div>
 
-        <div className="w-[180px] shrink-0">
+        <div className="w-44 sm:w-48">
           <Select
             options={sortOptions}
             value={sortBy}
@@ -87,7 +87,7 @@ export default function PedidosFilters({
           />
         </div>
 
-        <span className="ml-auto shrink-0 rounded-full bg-brand-50 dark:bg-brand-950/20 px-3 py-1 text-xs font-medium text-brand-600 dark:text-brand-400">
+        <span className="ml-auto rounded-full bg-brand-50 dark:bg-brand-950/20 px-3 py-1 text-xs font-semibold text-brand-600 dark:text-brand-400">
           {processedCount} Registros
         </span>
       </div>

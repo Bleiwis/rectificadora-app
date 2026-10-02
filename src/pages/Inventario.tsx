@@ -258,39 +258,32 @@ export default function Inventario() {
       {/* Contenedor Principal (Tabla Completa) */}
       <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03] sm:p-8">
         
-        {/* Fila superior con buscador y botón de Agregar */}
-        <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">
-          <div className="max-w-[400px] w-full relative">
-            <input
-              type="text"
-              placeholder="Buscar artículo..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
-            />
-          </div>
+        {/* Barra unificada de Búsqueda, Filtros y Acciones */}
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
+            <div className="relative min-w-[200px] max-w-xs flex-1">
+              <input
+                type="text"
+                placeholder="Buscar artículo..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-2.5 top-2.5 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
 
-          {!isCaja && (
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-600 transition"
-            >
-              + Agregar Artículo
-            </button>
-          )}
-        </div>
-
-        {/* Barra de Filtros y Búsqueda */}
-        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {/* Filtrar Categoría */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
-              Categoría
-            </label>
             <select
               value={filterCategory}
               onChange={(e) => setFilterCategory(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
+              className="rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
             >
               <option value="All">Todas las Categorías</option>
               {categoriesList.map((cat) => (
@@ -299,43 +292,40 @@ export default function Inventario() {
                 </option>
               ))}
             </select>
-          </div>
 
-          {/* Filtrar por Alerta de Stock */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
-              Estado de Stock
-            </label>
             <select
               value={filterStockStatus}
               onChange={(e) => setFilterStockStatus(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
+              className="rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
             >
               <option value="All">Todos los Estados</option>
               <option value="InStock">Suficiente Existencia</option>
-              <option value="LowStock">Próximo a Agotarse (Bajo Stock)</option>
+              <option value="LowStock">Próximo a Agotarse</option>
               <option value="OutOfStock">Sin Existencia (Agotado)</option>
             </select>
-          </div>
 
-          {/* Criterio de Ordenamiento */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
-              Ordenar por
-            </label>
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
+              className="rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
             >
               <option value="default">Orden por Defecto</option>
-              <option value="low-stock-first">Próximos a quedarse sin existencia</option>
+              <option value="low-stock-first">Próximos a agotarse</option>
               <option value="qty-desc">Cantidad: Mayor a Menor</option>
               <option value="qty-asc">Cantidad: Menor a Mayor</option>
               <option value="price-desc">Precio: Mayor a Menor</option>
               <option value="price-asc">Precio: Menor a Mayor</option>
             </select>
           </div>
+
+          {!isCaja && (
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 transition shrink-0"
+            >
+              + Agregar Artículo
+            </button>
+          )}
         </div>
 
         {/* Tabla de Inventario */}

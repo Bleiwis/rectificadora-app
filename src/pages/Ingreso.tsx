@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, Link } from "react-router";
 import PageBreadcrumb from "../components/common/PageBreadCrumb";
 import PageMeta from "../components/common/PageMeta";
 import { useAuth } from "../hooks/useAuth";
@@ -933,6 +933,26 @@ export default function Ingreso() {
         </div>
       )}
 
+      {lanStatus?.config.mode === "client" && !lanStatus.remoteReachable && (
+        <div className="mb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl border border-red-300 bg-red-50 p-4 text-sm font-medium text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">📡</span>
+            <div>
+              <p className="font-semibold text-red-900 dark:text-red-200">Terminal Cliente sin conexión al Servidor LAN</p>
+              <p className="text-xs text-red-700 dark:text-red-300 mt-0.5">
+                No se pueden registrar órdenes porque el servidor ({lanStatus.config.host}:{lanStatus.config.port}) no responde.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/ajustes"
+            className="shrink-0 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 transition"
+          >
+            Ver Ajustes LAN
+          </Link>
+        </div>
+      )}
+
       {validationError && (
         <div className="mb-4 flex items-center justify-between rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
           <div className="flex items-center gap-2">
@@ -1122,20 +1142,16 @@ export default function Ingreso() {
 
             {/* Tarjeta 2: Servicios */}
             <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03] sm:p-8">
-              <div className="mb-5">
+              <div className="mb-4">
                 <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
                   Servicios a Realizar
                 </h3>
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Selecciona primero los trabajos de rectificación para definir
-                  el costo base.
+                  Selecciona los trabajos de rectificación requeridos.
                 </p>
               </div>
 
               <div className="space-y-3">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Checklist de Servicios
-                </label>
                 <div className="divide-y divide-gray-150 rounded-xl border border-gray-100 dark:divide-gray-800 dark:border-gray-800">
                   {servicesList.map((service) => (
                     <div
@@ -1200,16 +1216,16 @@ export default function Ingreso() {
               </div>
 
               {/* Grid Dinámico de Partes */}
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Partes del Motor Recibidas
-                  </label>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Partes Recibidas
+                  </span>
                   <button
                     id="ingreso-add-part-btn"
                     type="button"
                     onClick={handleAddPartRow}
-                    className="text-xs font-semibold text-brand-600 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-400 dark:text-brand-400 dark:hover:text-brand-300"
+                    className="inline-flex items-center gap-1 rounded-md bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:bg-brand-950/40 dark:text-brand-400 transition"
                   >
                     + Agregar Parte
                   </button>
@@ -1223,80 +1239,67 @@ export default function Ingreso() {
 
                 {partsList.length === 0 && (
                   <div className="rounded-xl border border-dashed border-gray-300 px-4 py-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                    No hay partes agregadas. Presiona "Agregar Parte" para comenzar.
+                    No hay partes agregadas. Presiona "+ Agregar Parte" para comenzar.
                   </div>
                 )}
 
-                {partsList.map((row, index) => (
-                  <div
-                    key={index}
-                    className="flex flex-col gap-3 rounded-xl border border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-end"
-                  >
-                    <div className="flex-1">
-                      <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
-                        Parte
-                      </label>
-                      <input
-                        data-part-name="true"
-                        type="text"
-                        value={row.partName}
-                        onChange={(e) =>
-                          handlePartRowChange(index, "partName", e.target.value)
-                        }
-                        placeholder="Ej. Tapa de cilindros, bloque, ciguenal"
-                        className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                      />
+                {partsList.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="hidden sm:grid sm:grid-cols-12 gap-3 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      <div className="sm:col-span-6">Pieza / Componente</div>
+                      <div className="sm:col-span-2 text-center">Cantidad</div>
+                      <div className="sm:col-span-3">Medida / Rectificación</div>
+                      <div className="sm:col-span-1 text-right"></div>
                     </div>
-
-                    <div className="w-20">
-                      <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
-                        Cantidad
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={row.quantity}
-                        onChange={(e) =>
-                          handlePartRowChange(
-                            index,
-                            "quantity",
-                            parseInt(e.target.value, 10) || 1,
-                          )
-                        }
-                        className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-850 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white"
-                      />
-                    </div>
-
-                    <div className="w-32">
-                      <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
-                        Medida Salida
-                      </label>
-                      <input
-                        type="text"
-                        value={row.measurement}
-                        onChange={(e) =>
-                          handlePartRowChange(
-                            index,
-                            "measurement",
-                            e.target.value,
-                          )
-                        }
-                        placeholder="Ej. Std / 0.50"
-                        className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-850 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white"
-                      />
-                    </div>
-
-                    {partsList.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemovePartRow(index)}
-                        className="mb-2 rounded-lg px-2.5 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition"
+                    {partsList.map((row, index) => (
+                      <div
+                        key={index}
+                        className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-3 items-center rounded-lg border border-gray-150 bg-gray-50/50 p-2.5 dark:border-gray-800 dark:bg-white/[0.02]"
                       >
-                        Remover
-                      </button>
-                    )}
+                        <div className="sm:col-span-6">
+                          <input
+                            data-part-name="true"
+                            type="text"
+                            value={row.partName}
+                            onChange={(e) => handlePartRowChange(index, "partName", e.target.value)}
+                            placeholder="Ej. Cigüeñal, Bloque, Tapa..."
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <input
+                            type="number"
+                            min="1"
+                            value={row.quantity}
+                            onChange={(e) => handlePartRowChange(index, "quantity", parseInt(e.target.value, 10) || 1)}
+                            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-center text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                          />
+                        </div>
+                        <div className="sm:col-span-3">
+                          <input
+                            type="text"
+                            value={row.measurement}
+                            onChange={(e) => handlePartRowChange(index, "measurement", e.target.value)}
+                            placeholder="Ej. Std / 0.20 / 0.50"
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                          />
+                        </div>
+                        <div className="sm:col-span-1 flex justify-end">
+                          {partsList.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePartRow(index)}
+                              title="Eliminar fila"
+                              className="rounded p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             </div>
 
@@ -1317,67 +1320,56 @@ export default function Ingreso() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-6">
-                <div className="sm:col-span-3">
-                  <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
-                    Buscar repuesto
-                  </label>
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
+                <div className="sm:col-span-5">
                   <input
                     type="text"
                     value={inventorySearchTerm}
                     onChange={(e) => setInventorySearchTerm(e.target.value)}
-                    placeholder="Nombre o categoria"
+                    placeholder="Filtrar por nombre o categoría..."
                     className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-xs text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:text-white"
                   />
                 </div>
 
-                <div className="sm:col-span-2">
-                  <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
-                    Repuesto
-                  </label>
+                <div className="sm:col-span-5">
                   <select
                     value={inventorySelectId}
                     onChange={(e) => setInventorySelectId(e.target.value)}
                     className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-xs text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                   >
-                    <option value="">-- Seleccionar --</option>
+                    <option value="">-- Seleccionar repuesto --</option>
                     {filteredInventoryList.map((item) => (
                       <option
                         key={item.id}
                         value={item.id}
                         disabled={item.quantity <= 0}
                       >
-                        {item.name} (${item.priceUSD.toFixed(2)}) - Disp:{" "}
-                        {item.quantity}
+                        {item.name} (${item.priceUSD.toFixed(2)}) - Disp: {item.quantity}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                <div className="sm:col-span-1">
-                  <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
-                    Cant.
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      min="1"
-                      value={inventoryQuantityToAdd}
-                      onChange={(e) =>
-                        setInventoryQuantityToAdd(
-                          parseInt(e.target.value, 10) || 1,
-                        )
-                      }
-                      className="w-full rounded-lg border border-gray-300 bg-transparent px-2 py-2 text-xs text-center outline-none focus:border-brand-500 dark:border-gray-700 dark:text-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAddInventoryItem}
-                      className="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-600 transition"
-                    >
-                      +
-                    </button>
-                  </div>
+                <div className="sm:col-span-2 flex gap-1.5 items-center">
+                  <input
+                    type="number"
+                    min="1"
+                    value={inventoryQuantityToAdd}
+                    onChange={(e) =>
+                      setInventoryQuantityToAdd(
+                        parseInt(e.target.value, 10) || 1,
+                      )
+                    }
+                    placeholder="Cant."
+                    className="w-16 rounded-lg border border-gray-300 bg-transparent px-2 py-2 text-xs text-center outline-none focus:border-brand-500 dark:border-gray-700 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddInventoryItem}
+                    className="flex-1 rounded-lg bg-brand-500 px-2.5 py-2 text-xs font-semibold text-white hover:bg-brand-600 transition"
+                  >
+                    + Agregar
+                  </button>
                 </div>
               </div>
 
@@ -1427,13 +1419,13 @@ export default function Ingreso() {
               Programación y Totales
             </h3>
 
-            {/* Configuración de entrega y estado de pago */}
-            <div className="space-y-4 pt-4 border-t border-gray-150 dark:border-gray-800">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Días Tentativos de Entrega
-                  </label>
+            {/* Configuración de entrega */}
+            <div className="space-y-3 pt-4 border-t border-gray-150 dark:border-gray-800">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                  Tiempo estimado de entrega (días)
+                </label>
+                <div className="flex items-center gap-2">
                   <input
                     type="text"
                     inputMode="numeric"
@@ -1442,17 +1434,21 @@ export default function Ingreso() {
                       const onlyDigits = normalizeDigitsOnly(e.target.value);
                       setDeliveryDays(parseInt(onlyDigits || "1", 10) || 1);
                     }}
-                    className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white"
+                    className="w-24 rounded-lg border border-gray-300 bg-transparent px-3 py-1.5 text-center text-sm font-semibold text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white"
                   />
+                  <span className="text-xs text-gray-500">días hábiles</span>
                 </div>
               </div>
-
-              <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  El pago o abono se registra desde el botón "Registrar pago".
-                  Si el cliente no paga al ingresar, usa "Cobrar después".
-                </p>
-              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Entrega tentativa:{" "}
+                <strong className="text-gray-800 dark:text-white">
+                  {(() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + Number(deliveryDays || 1));
+                    return d.toLocaleDateString("es-VE", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+                  })()}
+                </strong>
+              </p>
             </div>
 
             {/* Totales */}

@@ -52,6 +52,7 @@ import {
   startBcvRateSyncInterval,
   stopBcvRateSyncInterval,
 } from "./bcv-rate-service.js";
+import { initializeAutoUpdater } from "./auto-updater.js";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -1178,6 +1179,10 @@ app.whenReady().then(() => {
 
   createSystemTray();
   createMainWindow();
+  initializeAutoUpdater({
+    isDevelopment,
+    getMainWindow: () => mainWindow,
+  });
   applyLanServerMode(authStore);
   const effectiveLanConfig = getEffectiveLanConfig();
   if (effectiveLanConfig.mode !== "client") {

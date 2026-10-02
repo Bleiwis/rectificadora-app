@@ -143,6 +143,35 @@ type LocalNetworkIp = {
   cidr: string;
 };
 
+type UpdaterState = {
+  enabled: boolean;
+  disabledReason: string | null;
+  checking: boolean;
+  available: boolean;
+  downloaded: boolean;
+  currentVersion: string;
+  latestVersion: string | null;
+  downloadedVersion: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+};
+
+type UpdaterEvent = {
+  type:
+    | "disabled"
+    | "checking"
+    | "checked"
+    | "available"
+    | "not-available"
+    | "download-progress"
+    | "downloaded"
+    | "installing"
+    | "error";
+  payload: Record<string, unknown>;
+  state: UpdaterState;
+  at: string;
+};
+
 interface Window {
   database: {
     getServices: () => Promise<{ id: string; name: string; priceUSD: number; category: string; description: string }[]>;
@@ -212,5 +241,17 @@ interface Window {
   license?: {
     getStatus: () => Promise<LicenseStatusPayload>;
     refresh: () => Promise<LicenseStatusPayload>;
+  };
+  updater?: {
+    getState: () => Promise<UpdaterState>;
+    checkForUpdates: () => Promise<{
+      ok: boolean;
+      reason?: string;
+      message?: string;
+      checkedAt?: string;
+      updateInfo?: Record<string, unknown> | null;
+    }>;
+    quitAndInstall: () => Promise<{ ok: boolean; reason?: string }>;
+    onEvent: (listener: (event: UpdaterEvent) => void) => () => void;
   };
 }

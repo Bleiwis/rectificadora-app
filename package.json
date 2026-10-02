@@ -34,6 +34,7 @@
     "apexcharts": "^4.1.0",
     "better-sqlite3": "^12.11.1",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.8.9",
     "flatpickr": "^4.6.13",
     "react": "^19.0.0",
     "react-apexcharts": "^1.7.0",
@@ -116,6 +117,14 @@
     "nsis": {
       "include": "build/installer-lan-role.nsh"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Bleiwis",
+        "repo": "rectificadora-app",
+        "releaseType": "release"
+      }
+    ],
     "linux": {
       "target": [
         "AppImage"

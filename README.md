@@ -130,6 +130,21 @@ npm run dev:desktop
 | `npm run test` | Ejecuta Vitest. |
 | `npm run test:coverage` | Ejecuta pruebas con reporte de cobertura. |
 
+## Auto-actualización por GitHub Releases
+
+El proyecto ya incluye soporte técnico para actualización automática en Windows usando `electron-updater` y publicaciones en GitHub Releases.
+
+Componentes clave:
+
+- Integración de updater en main process.
+- Bridge seguro en preload (`window.updater`).
+- Configuración `publish` en `electron-builder` (provider GitHub).
+- Workflow de release: [.github/workflows/release-windows.yml](.github/workflows/release-windows.yml).
+
+Guía completa de operación y configuración de GitHub:
+
+- [docs/github-auto-updater-guide.md](docs/github-auto-updater-guide.md)
+
 ## Calidad y verificación recomendada
 
 Antes de cerrar cambios, ejecutar:

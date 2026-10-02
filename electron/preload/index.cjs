@@ -98,6 +98,13 @@ const LICENSE_CHANNELS = {
   refresh: "license:refresh",
 };
 
+const UPDATER_CHANNELS = {
+  getState: "updater:get-state",
+  checkForUpdates: "updater:check-for-updates",
+  quitAndInstall: "updater:quit-and-install",
+  event: "updater:event",
+};
+
 contextBridge.exposeInMainWorld("database", {
   getServices() {
     return ipcRenderer.invoke(DB_CHANNELS.getServices);
@@ -206,5 +213,28 @@ contextBridge.exposeInMainWorld("license", {
   },
   refresh() {
     return ipcRenderer.invoke(LICENSE_CHANNELS.refresh);
+  },
+});
+
+contextBridge.exposeInMainWorld("updater", {
+  getState() {
+    return ipcRenderer.invoke(UPDATER_CHANNELS.getState);
+  },
+  checkForUpdates() {
+    return ipcRenderer.invoke(UPDATER_CHANNELS.checkForUpdates);
+  },
+  quitAndInstall() {
+    return ipcRenderer.invoke(UPDATER_CHANNELS.quitAndInstall);
+  },
+  onEvent(listener) {
+    if (typeof listener !== "function") {
+      return () => {};
+    }
+
+    const wrappedListener = (_event, payload) => listener(payload);
+    ipcRenderer.on(UPDATER_CHANNELS.event, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(UPDATER_CHANNELS.event, wrappedListener);
+    };
   },
 });
