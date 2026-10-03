@@ -1,6 +1,48 @@
-import { app, ipcMain } from "electron";
-import { autoUpdater } from "electron-updater";
+import { app, ipcMain, dialog } from "electron";
+import { createRequire } from "node:module";
+import electronUpdaterPkg from "electron-updater";
 import { UPDATER_CHANNELS } from "../shared/updater-channels.js";
+
+function resolveAutoUpdater() {
+  if (electronUpdaterPkg?.autoUpdater) {
+    return electronUpdaterPkg.autoUpdater;
+  }
+  if (electronUpdaterPkg?.default?.autoUpdater) {
+    return electronUpdaterPkg.default.autoUpdater;
+  }
+  try {
+    const require = createRequire(import.meta.url);
+    const cjs = require("electron-updater");
+    return cjs.autoUpdater || cjs.default?.autoUpdater || cjs;
+  } catch {
+    return null;
+  }
+}
+
+const autoUpdater = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      const updater = resolveAutoUpdater();
+      if (!updater) {
+        throw new Error("No se pudo obtener la instancia de autoUpdater de electron-updater.");
+      }
+      const value = updater[prop];
+      if (typeof value === "function") {
+        return value.bind(updater);
+      }
+      return value;
+    },
+    set(_target, prop, value) {
+      const updater = resolveAutoUpdater();
+      if (!updater) {
+        throw new Error("No se pudo obtener la instancia de autoUpdater de electron-updater.");
+      }
+      updater[prop] = value;
+      return true;
+    },
+  }
+);
 
 const state = {
   enabled: false,
@@ -154,6 +196,24 @@ function bindUpdaterListeners() {
       lastError: null,
     });
     emitUpdaterEvent("downloaded", { info });
+
+    const win = getMainWindowRef();
+    const versionLabel = info?.version ? `versión ${info.version}` : "nueva versión";
+    dialog
+      .showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+        type: "info",
+        title: "Actualización lista",
+        message: `La ${versionLabel} ha sido descargada. ¿Deseas reiniciar la aplicación ahora para instalarla?`,
+        buttons: ["Reiniciar ahora", "Más tarde"],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then((result) => {
+        if (result.response === 0) {
+          autoUpdater.quitAndInstall(false, true);
+        }
+      })
+      .catch(() => {});
   });
 
   autoUpdater.on("error", (error) => {

@@ -15,6 +15,7 @@
     "build:web": "tsc -b && vite build",
     "build:desktop": "npm run build:web && electron-builder",
     "build:windows": "node scripts/build-windows.mjs",
+    "release:windows": "node scripts/build-windows.mjs --publish always",
     "lint": "eslint .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage --coverage.reporter=text --coverage.reporter=html --coverage.reporter=json-summary",

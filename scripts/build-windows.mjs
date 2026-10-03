@@ -80,5 +80,6 @@ const workspaceRoot = process.cwd();
 const loadedEnv = loadEnvFile(path.join(workspaceRoot, ".env")) || {};
 writeRuntimeEnvBundle(path.join(workspaceRoot, "electron/main/runtime-env.generated"), loadedEnv);
 
+const extraArgs = process.argv.slice(2);
 runCommand("npm", ["run", "build:web"]);
-runCommand("npm", ["exec", "electron-builder", "--", "--win"]);
+runCommand("npm", ["exec", "electron-builder", "--", "--win", ...extraArgs]);

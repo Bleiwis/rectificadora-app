@@ -89,6 +89,12 @@ export default function Ajustes() {
   const [isRestoringCloud, setIsRestoringCloud] = useState(false);
   const [restoreSummary, setRestoreSummary] = useState<CloudRestoreResult | null>(null);
 
+  // License state
+  const [licenseState, setLicenseState] = useState<LicenseStatusPayload | null>(null);
+  const [isRefreshingLicense, setIsRefreshingLicense] = useState(false);
+  const [copiedInstallationId, setCopiedInstallationId] = useState(false);
+  const [licenseFeedback, setLicenseFeedback] = useState<string | null>(null);
+
   const refreshLanState = useCallback(async (showErrors = false) => {
     try {
       const [config, status] = await Promise.all([
@@ -119,10 +125,55 @@ export default function Ajustes() {
     }
   }, []);
 
+  const loadLicenseState = useCallback(async () => {
+    const licenseApi = typeof window !== "undefined" ? window.license : undefined;
+    if (!licenseApi) return;
+    try {
+      const status = await licenseApi.getStatus();
+      setLicenseState(status);
+    } catch (err) {
+      console.error("Error al consultar licencia en ajustes:", err);
+    }
+  }, []);
+
+  const handleRefreshLicense = async () => {
+    const licenseApi = typeof window !== "undefined" ? window.license : undefined;
+    if (!licenseApi || isRefreshingLicense) return;
+    setIsRefreshingLicense(true);
+    setLicenseFeedback(null);
+    try {
+      const refreshed = await licenseApi.refresh();
+      setLicenseState(refreshed);
+      setLicenseFeedback(
+        refreshed.status === "active"
+          ? "✓ Licencia verificada y activa con el servidor."
+          : refreshed.status === "warning"
+          ? `⚠️ Licencia activa con aviso: restan ${refreshed.daysUntilBlock} día(s) para el corte.`
+          : "⚠️ La licencia continúa bloqueada por falta de pago o vencimiento."
+      );
+    } catch {
+      setLicenseFeedback("No fue posible conectar con el servidor de licencias. Verifica la conexión a internet.");
+    } finally {
+      setIsRefreshingLicense(false);
+    }
+  };
+
+  const handleCopyInstallationId = async () => {
+    if (!licenseState?.installationId) return;
+    try {
+      await navigator.clipboard.writeText(licenseState.installationId);
+      setCopiedInstallationId(true);
+      setTimeout(() => setCopiedInstallationId(false), 2500);
+    } catch {
+      // fallback
+    }
+  };
+
   useEffect(() => {
     void refreshLanState();
     void refreshLocalIps();
-  }, [refreshLanState, refreshLocalIps]);
+    void loadLicenseState();
+  }, [refreshLanState, refreshLocalIps, loadLicenseState]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -694,6 +745,110 @@ export default function Ajustes() {
               </div>
             </div>
           ) : null}
+        </div>
+
+        {/* Tarjeta 3: Licencia y Suscripción */}
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">
+                Licencia y Suscripción del Sistema
+              </h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Información de instalación, fechas de corte y estado de activación en este equipo.
+              </p>
+            </div>
+            {licenseState && (
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold self-start sm:self-auto ${
+                  licenseState.status === "active"
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40"
+                    : licenseState.status === "warning"
+                    ? "bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300 border border-amber-200 dark:border-amber-800/40"
+                    : "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300 border border-red-200 dark:border-red-800/40"
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    licenseState.status === "active"
+                      ? "bg-emerald-500"
+                      : licenseState.status === "warning"
+                      ? "bg-amber-500"
+                      : "bg-red-500"
+                  }`}
+                />
+                {licenseState.status === "active" && "Licencia Activa"}
+                {licenseState.status === "warning" && `Aviso: Restan ${licenseState.daysUntilBlock} días`}
+                {licenseState.status === "blocked" && "Licencia Bloqueada"}
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div className="rounded-xl border border-gray-150 bg-gray-50/70 p-3.5 dark:border-gray-800 dark:bg-white/[0.02]">
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-medium text-gray-500 dark:text-gray-400">ID de Instalación:</span>
+                <button
+                  type="button"
+                  onClick={handleCopyInstallationId}
+                  className="inline-flex items-center gap-1 rounded bg-white px-2 py-0.5 text-xxs font-semibold text-brand-600 border border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-brand-400 transition cursor-pointer"
+                >
+                  {copiedInstallationId ? "✓ Copiado" : "📋 Copiar"}
+                </button>
+              </div>
+              <p className="font-mono text-xs font-bold text-gray-800 dark:text-gray-200 break-all select-all">
+                {licenseState?.installationId || "No disponible"}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-gray-150 bg-gray-50/70 p-3.5 dark:border-gray-800 dark:bg-white/[0.02] flex flex-col justify-between">
+              <div>
+                <span className="font-medium text-gray-500 dark:text-gray-400">Próximo corte / vencimiento:</span>
+                <p className="mt-1 font-semibold text-gray-800 dark:text-gray-200">
+                  {licenseState?.blockAt
+                    ? new Date(licenseState.blockAt).toLocaleDateString("es-VE", {
+                        weekday: "long",
+                        day: "2-digit",
+                        month: "long",
+                        year: "numeric",
+                      })
+                    : "No programado"}
+                </p>
+              </div>
+              {licenseState?.lastSyncAt && (
+                <p className="mt-2 text-xxs text-gray-400 dark:text-gray-500">
+                  Última sincronización: {new Date(licenseState.lastSyncAt).toLocaleString()}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {licenseFeedback && (
+            <div className="mt-3 rounded-lg border border-brand-200 bg-brand-50/50 p-2.5 text-xs text-brand-900 dark:border-brand-800/40 dark:bg-brand-950/20 dark:text-brand-200">
+              {licenseFeedback}
+            </div>
+          )}
+
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={handleRefreshLicense}
+              disabled={isRefreshingLicense}
+              className="inline-flex items-center gap-2 rounded-lg bg-gray-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-gray-800 disabled:opacity-60 dark:bg-gray-800 dark:hover:bg-gray-700 transition cursor-pointer"
+            >
+              {isRefreshingLicense ? (
+                <>
+                  <svg className="h-3.5 w-3.5 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Verificando con servidor...</span>
+                </>
+              ) : (
+                <span>🔄 Verificar Licencia con Servidor</span>
+              )}
+            </button>
+          </div>
         </div>
 
         <div className="mt-6 flex justify-end gap-2">

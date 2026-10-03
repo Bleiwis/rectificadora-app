@@ -1,41 +1,16 @@
-import { useState, useEffect, useMemo } from "react";
-import { Link } from "react-router";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import PageMeta from "../../components/common/PageMeta";
-
-interface PartRow {
-  partName: string;
-  customName?: string;
-  quantity: number;
-  measurement: string;
-}
-
-interface OrderItem {
-  id: string;
-  code: string;
-  clientId?: string | null;
-  clientName: string;
-  clientLastName: string;
-  clientCI: string;
-  clientPhone: string;
-  clientAddress: string;
-  engineModel: string;
-  parts: PartRow[];
-  services: { name: string; priceUSD: number }[];
-  inventoryItems?: { id: string; name: string; priceUSD: number; quantity: number }[];
-  totalUSD: number;
-  totalVES: number;
-  paidUSD?: number;
-  balanceUSD?: number;
-  entryDate: string;
-  deliveryDays: number;
-  tentativeDeliveryDate: string;
-  paymentStatus: "Paga" | "Abonada" | "Pendiente por cobrar";
-  orderStatus?: "Ingresado" | "Parcialmente retirado" | "Retirado" | "Cancelada";
-  priority: "Baja" | "Media" | "Alta";
-  responsible?: string;
-  createdBy: string;
-  createdByUserId?: string;
-}
+import {
+  DeliveriesCard,
+  InventoryAlertCard,
+  AllDeliveriesModal,
+  OrderQuickPreviewModal,
+  ReceivablesCard,
+  AllReceivablesModal,
+  ReceivablesQuickPaymentModal,
+} from "../../components/dashboard";
+import type { OrderItem } from "../../components/pedidos/models/types";
+import { getReceivablesStats } from "../../utils/receivablesSchedule";
 
 interface InventoryItem {
   id: string;
@@ -51,17 +26,51 @@ export default function Home() {
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [kpiFilter, setKpiFilter] = useState<"Today" | "Week" | "Month" | "All">("Month");
+  const [bcvRate, setBcvRate] = useState<number>(0);
 
-  // Load data from SQLite database on mount
-  useEffect(() => {
-    window.database.getOrders().then((list) => {
-      if (list) setOrders(list as unknown as OrderItem[]);
-    }).catch(console.error);
+  // Modals state
+  const [isAllDeliveriesOpen, setIsAllDeliveriesOpen] = useState(false);
+  const [isAllReceivablesOpen, setIsAllReceivablesOpen] = useState(false);
+  const [previewOrder, setPreviewOrder] = useState<OrderItem | null>(null);
+  const [paymentOrder, setPaymentOrder] = useState<OrderItem | null>(null);
 
-    window.database.getInventory().then((list) => {
-      if (list) setInventory(list as unknown as InventoryItem[]);
-    }).catch(console.error);
+  const loadData = useCallback(() => {
+    window.database
+      .getOrders()
+      .then((list) => {
+        if (Array.isArray(list)) setOrders(list as unknown as OrderItem[]);
+      })
+      .catch(console.error);
+
+    window.database
+      .getInventory()
+      .then((list) => {
+        if (Array.isArray(list)) setInventory(list as unknown as InventoryItem[]);
+      })
+      .catch(console.error);
+
+    window.database
+      .getBcvUsdRateStatus()
+      .then((status) => {
+        if (status?.latestRate?.valueUsd) {
+          setBcvRate(Number(status.latestRate.valueUsd));
+        }
+      })
+      .catch(console.error);
   }, []);
+
+  // Load data on mount
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Today reference
+  const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
+  // Receivables stats
+  const receivablesStats = useMemo(() => {
+    return getReceivablesStats(orders, todayIso);
+  }, [orders, todayIso]);
 
   // Filter orders based on the selected KPI range
   const filteredOrdersForKPI = useMemo(() => {
@@ -91,55 +100,29 @@ export default function Home() {
 
   // Compute metrics
   const totalOrdersCount = filteredOrdersForKPI.length;
-  const totalRevenueUSD = filteredOrdersForKPI.reduce((sum, o) => sum + o.totalUSD, 0);
+  const totalRevenueUSD = filteredOrdersForKPI.reduce((sum, o) => sum + (o.totalUSD || 0), 0);
   const totalRevenueVES = filteredOrdersForKPI.reduce((sum, o) => sum + (o.totalVES || 0), 0);
-
-  // Active (Pending payment or pending work) orders count
-  const activeOrdersCount = orders.filter(
-    (o) =>
-      o.paymentStatus !== "Paga" &&
-      (o.orderStatus || "Ingresado") !== "Retirado" &&
-      (o.orderStatus || "Ingresado") !== "Cancelada",
-  ).length;
 
   // Inventory Stock alerts
   const lowStockItems = useMemo(() => {
     return inventory.filter((item) => item.quantity <= item.minStock);
   }, [inventory]);
 
-  // Near due date orders (due in <= 3 days, only pending ones)
-  const nearDueOrders = useMemo(() => {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const limitDate = new Date();
-    limitDate.setDate(now.getDate() + 3);
-    limitDate.setHours(23, 59, 59, 999);
-
-    return orders
-      .filter((o) => {
-        if ((o.orderStatus || "Ingresado") === "Retirado") return false;
-        if ((o.orderStatus || "Ingresado") === "Cancelada") return false;
-        if (o.paymentStatus === "Paga") return false; // ignore fully completed/paid ones for critical pending alert
-        const dueDate = new Date(o.tentativeDeliveryDate);
-        return dueDate >= now && dueDate <= limitDate;
-      })
-      .sort((a, b) => a.tentativeDeliveryDate.localeCompare(b.tentativeDeliveryDate));
-  }, [orders]);
-
   return (
     <>
       <PageMeta
         title="Resumen General | Rectificadora App"
-        description="Panel de KPIs, métricas de órdenes de servicio y alertas de entrega o stock."
+        description="Panel de KPIs, métricas de órdenes de servicio, cuentas por cobrar y alertas operativas."
       />
 
       <div className="space-y-6">
-        
         {/* Encabezado del Dashboard */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Resumen General</h1>
-            <p className="text-sm text-gray-500 mt-1">Control de KPIs y alertas operativas de la rectificadora.</p>
+            <p className="text-sm text-gray-500 mt-1">
+              Control de KPIs, fechas de entrega, cuentas por cobrar y alertas operativas de la rectificadora.
+            </p>
           </div>
 
           {/* Selector de Rango de KPI */}
@@ -147,7 +130,7 @@ export default function Home() {
             <select
               value={kpiFilter}
               onChange={(e) => setKpiFilter(e.target.value as "Today" | "Week" | "Month" | "All")}
-              className="rounded-lg border border-gray-300 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-white outline-none transition focus:border-brand-500 dark:border-gray-700"
+              className="rounded-lg border border-gray-300 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-white outline-none transition focus:border-brand-500 dark:border-gray-700 cursor-pointer"
             >
               <option value="Today">Hoy</option>
               <option value="Week">Esta Semana</option>
@@ -159,9 +142,8 @@ export default function Home() {
 
         {/* Tarjetas KPI principales */}
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
-          
           {/* Card 1: Pedidos */}
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs dark:border-gray-800 dark:bg-white/[0.03]">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-gray-500">Pedidos Registrados</span>
               <span className="rounded-lg bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-600 dark:bg-blue-950/30 dark:text-blue-400">
@@ -176,132 +158,123 @@ export default function Home() {
           </div>
 
           {/* Card 2: Facturación */}
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs dark:border-gray-800 dark:bg-white/[0.03]">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-gray-500">Facturación Estimada</span>
               <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Total Acumulado</span>
             </div>
             <div className="mt-4">
-              <div className="text-2xl font-bold text-gray-800 dark:text-white">${totalRevenueUSD.toFixed(2)} USD</div>
+              <div className="text-2xl font-bold text-gray-800 dark:text-white">
+                ${totalRevenueUSD.toFixed(2)} USD
+              </div>
               <div className="text-xs text-brand-600 dark:text-brand-400 mt-1 font-semibold">
                 Bs. {totalRevenueVES.toFixed(2)} VES
               </div>
             </div>
-            <p className="mt-2 text-xs text-gray-400">Suma total de montos registrados en dólares y bolívares respectivamente.</p>
+            <p className="mt-2 text-xs text-gray-400">
+              Suma total de montos registrados en dólares y bolívares respectivamente.
+            </p>
           </div>
 
-          {/* Card 3: Trabajos Activos */}
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
+          {/* Card 3: Cuentas Pendientes por Cobrar (Rediseñada con UI/UX Pro Max) */}
+          <div
+            onClick={() => setIsAllReceivablesOpen(true)}
+            className="group rounded-2xl border border-gray-200 bg-white p-6 shadow-xs transition hover:border-brand-300 hover:shadow-sm dark:border-gray-800 dark:bg-white/[0.03] dark:hover:border-brand-700/60 cursor-pointer"
+            title="Haga clic para ver el detalle de cuentas por cobrar"
+          >
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-500">Trabajos Pendientes de Pago</span>
-              <span className="rounded-lg bg-yellow-50 px-2.5 py-0.5 text-xs font-medium text-yellow-600 dark:bg-yellow-950/30 dark:text-yellow-400">
-                Total
+              <span className="text-sm font-medium text-gray-500 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition">
+                Capital por Cobrar
               </span>
+              {receivablesStats.criticalCount > 0 ? (
+                <span className="flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-0.5 text-xs font-bold text-red-600 dark:bg-red-950/40 dark:text-red-400">
+                  <span className="size-1.5 rounded-full bg-red-500 animate-pulse" />
+                  {receivablesStats.criticalCount} críticas
+                </span>
+              ) : (
+                <span className="rounded-lg bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400">
+                  Cartera al día
+                </span>
+              )}
             </div>
-            <div className="mt-4 flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-gray-800 dark:text-white">{activeOrdersCount}</span>
-              <span className="text-sm text-gray-500">pendientes</span>
+
+            <div className="mt-4">
+              <div className="font-mono text-2xl font-bold text-gray-800 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-400 transition">
+                ${receivablesStats.totalBalanceUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+              </div>
+              {bcvRate > 0 && (
+                <div className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-semibold">
+                  Bs. {(receivablesStats.totalBalanceUSD * bcvRate).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES
+                </div>
+              )}
             </div>
-            <p className="mt-2 text-xs text-gray-400">Órdenes de servicio activas con estatus "Pendiente por cobrar".</p>
+
+            <p className="mt-2 text-xs text-gray-400">
+              {receivablesStats.totalOrdersWithBalance} órdenes pendientes ({receivablesStats.recoveryPercentage}% recaudado). Clic para auditar.
+            </p>
+          </div>
+        </div>
+
+        {/* Sección Operativa 1: Entregas Programadas y Alertas de Stock */}
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          {/* Tarjeta Principal de Entregas Programadas (2 columnas en XL) */}
+          <div className="xl:col-span-2">
+            <DeliveriesCard
+              orders={orders}
+              onOpenOrderPreview={(order) => setPreviewOrder(order)}
+              onOpenAllDeliveries={() => setIsAllDeliveriesOpen(true)}
+            />
           </div>
 
+          {/* Tarjeta de Alerta de Stock de Inventario (1 columna en XL) */}
+          <div className="xl:col-span-1">
+            <InventoryAlertCard lowStockItems={lowStockItems} />
+          </div>
         </div>
 
-        {/* Tarjetas de Alertas Operativas */}
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          
-          {/* Alerta de Inventario (Bajo Stock) */}
-          <Link
-            to="/inventario"
-            className="group rounded-2xl border border-red-100 bg-red-50/20 p-6 dark:border-red-950/20 dark:bg-red-950/5 hover:border-red-300 dark:hover:border-red-800 transition block text-left"
-          >
-            <div className="flex justify-between items-start">
-              <div>
-                <h3 className="text-lg font-bold text-red-700 dark:text-red-400 flex items-center gap-2">
-                  ⚠️ Alerta de Stock de Inventario
-                </h3>
-                <p className="text-sm text-red-600/80 dark:text-red-300/70 mt-1">
-                  Artículos que están en nivel crítico o próximos a quedarse sin existencias.
-                </p>
-              </div>
-              <span className="rounded-full bg-red-100 dark:bg-red-900/40 px-3 py-1 text-xs font-bold text-red-700 dark:text-red-300 group-hover:scale-105 transition">
-                {lowStockItems.length} críticas
-              </span>
-            </div>
-
-            {/* Listado Rápido */}
-            <div className="mt-5 space-y-2.5">
-              {lowStockItems.slice(0, 3).map((item) => (
-                <div key={item.id} className="flex justify-between items-center bg-white/70 dark:bg-gray-900/60 p-2.5 rounded-lg text-xs">
-                  <span className="font-semibold text-gray-800 dark:text-white">{item.name}</span>
-                  <span className={`px-2 py-0.5 rounded font-bold ${
-                    item.quantity === 0 ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"
-                  }`}>
-                    Cant: {item.quantity} (Mín: {item.minStock})
-                  </span>
-                </div>
-              ))}
-              {lowStockItems.length === 0 && (
-                <div className="text-center py-4 text-xs text-gray-400">
-                  ✅ Todo en orden. No hay artículos con stock bajo.
-                </div>
-              )}
-              {lowStockItems.length > 3 && (
-                <div className="text-right text-xxs font-semibold text-red-600 dark:text-red-400">
-                  + ver {lowStockItems.length - 3} más en el Inventario →
-                </div>
-              )}
-            </div>
-          </Link>
-
-          {/* Alertas de pedidos próximos a vencer */}
-          <Link
-            to="/pedidos"
-            className="group rounded-2xl border border-orange-100 bg-orange-50/20 p-6 dark:border-orange-950/20 dark:bg-orange-950/5 hover:border-orange-300 dark:hover:border-orange-800 transition block text-left"
-          >
-            <div className="flex justify-between items-start">
-              <div>
-                <h3 className="text-lg font-bold text-orange-700 dark:text-orange-400 flex items-center gap-2">
-                  ⏰ Entregas Próximas (Urgentes)
-                </h3>
-                <p className="text-sm text-orange-600/80 dark:text-orange-300/70 mt-1">
-                  Pedidos pendientes cuya fecha estimada de entrega vence en los próximos 3 días.
-                </p>
-              </div>
-              <span className="rounded-full bg-orange-100 dark:bg-orange-900/40 px-3 py-1 text-xs font-bold text-orange-700 dark:text-orange-300 group-hover:scale-105 transition">
-                {nearDueOrders.length} próximas
-              </span>
-            </div>
-
-            {/* Listado Rápido */}
-            <div className="mt-5 space-y-2.5">
-              {nearDueOrders.slice(0, 3).map((order) => (
-                <div key={order.id} className="flex justify-between items-center bg-white/70 dark:bg-gray-900/60 p-2.5 rounded-lg text-xs">
-                  <div>
-                    <span className="font-semibold text-gray-800 dark:text-white">Nº {order.code}</span>
-                    <span className="text-gray-500 mx-1">|</span>
-                    <span className="text-gray-600 dark:text-gray-400">{order.clientName} ({order.engineModel})</span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded font-semibold bg-orange-100 text-orange-700">
-                    Vence: {order.tentativeDeliveryDate}
-                  </span>
-                </div>
-              ))}
-              {nearDueOrders.length === 0 && (
-                <div className="text-center py-4 text-xs text-gray-400">
-                  ✅ No hay entregas pendientes urgentes en los próximos 3 días.
-                </div>
-              )}
-              {nearDueOrders.length > 3 && (
-                <div className="text-right text-xxs font-semibold text-orange-600 dark:text-orange-400">
-                  + ver {nearDueOrders.length - 3} más en Pedidos →
-                </div>
-              )}
-            </div>
-          </Link>
-
+        {/* Sección Operativa 2: Gestión de Cuentas por Cobrar & Mora */}
+        <div className="grid grid-cols-1 gap-6">
+          <ReceivablesCard
+            orders={orders}
+            bcvRate={bcvRate}
+            onOpenOrderPreview={(order) => setPreviewOrder(order)}
+            onOpenPayment={(order) => setPaymentOrder(order)}
+            onOpenAllReceivables={() => setIsAllReceivablesOpen(true)}
+          />
         </div>
 
+        {/* Modal con Cronograma Completo de Entregas */}
+        <AllDeliveriesModal
+          isOpen={isAllDeliveriesOpen}
+          onClose={() => setIsAllDeliveriesOpen(false)}
+          orders={orders}
+          onSelectOrder={(order) => setPreviewOrder(order)}
+        />
+
+        {/* Modal con Consolidado Completo de Cartera y Cobranzas */}
+        <AllReceivablesModal
+          isOpen={isAllReceivablesOpen}
+          onClose={() => setIsAllReceivablesOpen(false)}
+          orders={orders}
+          bcvRate={bcvRate}
+          onSelectOrder={(order) => setPreviewOrder(order)}
+          onOpenPayment={(order) => setPaymentOrder(order)}
+        />
+
+        {/* Modal de Cobro / Abono Rápido */}
+        <ReceivablesQuickPaymentModal
+          order={paymentOrder}
+          isOpen={Boolean(paymentOrder)}
+          onClose={() => setPaymentOrder(null)}
+          onPaymentSuccess={loadData}
+          bcvRate={bcvRate}
+        />
+
+        {/* Modal de Vista Rápida de Orden */}
+        <OrderQuickPreviewModal
+          order={previewOrder}
+          onClose={() => setPreviewOrder(null)}
+        />
       </div>
     </>
   );

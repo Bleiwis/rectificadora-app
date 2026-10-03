@@ -43,36 +43,128 @@ const AuthUnavailableScreen = () => (
   </div>
 );
 
-const LicenseBlockedScreen = ({ license }: { license: LicenseStatusPayload }) => {
+const LicenseBlockedScreen = ({
+  license: initialLicense,
+  onRefreshSuccess,
+}: {
+  license: LicenseStatusPayload;
+  onRefreshSuccess?: (newStatus: LicenseStatusPayload) => void;
+}) => {
+  const [license, setLicense] = useState(initialLicense);
+  const [isChecking, setIsChecking] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+
   const isTrialExpired = license.reason === "trial-expired-missing-license";
 
+  const handleCopyId = async () => {
+    try {
+      await navigator.clipboard.writeText(license.installationId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // fallback
+    }
+  };
+
+  const handleVerifyNow = async () => {
+    const licenseApi = typeof window !== "undefined" ? window.license : undefined;
+    if (!licenseApi || isChecking) return;
+    setIsChecking(true);
+    setFeedbackMessage(null);
+    try {
+      const refreshed = await licenseApi.refresh();
+      setLicense(refreshed);
+      if (refreshed.status !== "blocked") {
+        onRefreshSuccess?.(refreshed);
+      } else {
+        setFeedbackMessage(
+          "El sistema verificó con el servidor pero la licencia continúa sin pago registrado.",
+        );
+      }
+    } catch {
+      setFeedbackMessage(
+        "No se pudo contactar al servidor de licencias. Verifica la conexión a internet de este equipo.",
+      );
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-900">
-      <div className="w-full max-w-xl rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm dark:border-red-900/50 dark:bg-gray-900">
-        <h1 className="text-2xl font-semibold text-red-700 dark:text-red-400">Licencia Bloqueada</h1>
-        <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-950">
+      <div className="w-full max-w-lg rounded-2xl border border-red-200 bg-white p-7 text-center shadow-lg dark:border-red-900/40 dark:bg-gray-900 sm:p-9">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100 dark:bg-red-950/50">
+          <svg className="h-7 w-7 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+        </div>
+
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Acceso Bloqueado por Licencia</h1>
+        <p className="mt-2.5 text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
           {isTrialExpired
-            ? "El periodo de prueba finalizo y la aplicacion se encuentra bloqueada hasta registrar una licencia valida."
-            : "El periodo de uso vencio y la aplicacion se encuentra bloqueada hasta registrar un nuevo pago."}
+            ? "El período de prueba ha finalizado. Registra un pago para reactivar el acceso completo al sistema."
+            : "El período de uso venció y la aplicación se encuentra en pausa hasta registrar un nuevo pago de suscripción."}
         </p>
-      <div className="mt-6 rounded-xl bg-red-50 p-4 text-left text-sm text-red-800 dark:bg-red-950/30 dark:text-red-200">
-        <p>
-          <strong>Instalacion:</strong> {license.installationId}
-        </p>
-        <p className="mt-1">
-          <strong>Fecha de bloqueo:</strong> {license.blockAt || "No disponible"}
-        </p>
-        {license.lastError && (
-          <p className="mt-1">
-            <strong>Detalle:</strong> {license.lastError}
+
+        {/* Tarjeta de identificación para soporte */}
+        <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50/80 p-4 text-left dark:border-gray-800 dark:bg-white/[0.02]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">ID de Instalación:</span>
+            <button
+              type="button"
+              onClick={handleCopyId}
+              className="inline-flex items-center gap-1 rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-brand-600 shadow-xs border border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-brand-400 dark:hover:bg-gray-700 transition cursor-pointer"
+            >
+              {copied ? "✓ Copiado" : "📋 Copiar ID"}
+            </button>
+          </div>
+          <p className="mt-1 font-mono text-xs font-bold text-gray-800 dark:text-gray-200 select-all break-all">
+            {license.installationId}
           </p>
+
+          <div className="mt-3 flex items-center justify-between border-t border-gray-200/60 pt-2.5 text-xs text-gray-500 dark:border-gray-800 dark:text-gray-400">
+            <span>Fecha de corte:</span>
+            <span className="font-semibold text-gray-700 dark:text-gray-300">
+              {license.blockAt ? new Date(license.blockAt).toLocaleDateString("es-VE", { day: "2-digit", month: "short", year: "numeric" }) : "No disponible"}
+            </span>
+          </div>
+        </div>
+
+        {/* Mensaje de feedback si la verificación falló */}
+        {feedbackMessage && (
+          <div className="mt-4 rounded-lg bg-amber-50 p-3 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 text-left border border-amber-200 dark:border-amber-900/40">
+            {feedbackMessage}
+          </div>
         )}
+
+        {/* Pasos y botón de acción */}
+        <div className="mt-6 space-y-3">
+          <button
+            type="button"
+            onClick={handleVerifyNow}
+            disabled={isChecking}
+            className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-500 py-3 px-4 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-70 transition cursor-pointer"
+          >
+            {isChecking ? (
+              <>
+                <svg className="h-4 w-4 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Verificando pago con el servidor...</span>
+              </>
+            ) : (
+              <span>🔄 Comprobar Pago Ahora</span>
+            )}
+          </button>
+
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Conecta el equipo a internet antes de pulsar comprobar pago.
+          </p>
+        </div>
       </div>
-      <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
-        Conecta el equipo a internet y solicita la actualizacion de licencia para continuar.
-      </p>
     </div>
-  </div>
   );
 };
 
@@ -218,7 +310,15 @@ const RequireAuth = ({ children }: { children: ReactNode }) => {
   }
 
   if (licenseState?.status === "blocked") {
-    return <LicenseBlockedScreen license={licenseState} />;
+    return (
+      <LicenseBlockedScreen
+        license={licenseState}
+        onRefreshSuccess={(newStatus) => {
+          setLicenseState(newStatus);
+          setShowLicenseWarningBanner(newStatus.status === "warning");
+        }}
+      />
+    );
   }
 
   return (

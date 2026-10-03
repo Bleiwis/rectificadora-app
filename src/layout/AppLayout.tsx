@@ -37,7 +37,7 @@ const LayoutContent: React.FC = () => {
         } ${isMobileOpen ? "ml-0" : ""}`}
       >
         <AppHeader />
-        <div className="flex-1 p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6">
+        <div className="flex-1 w-full p-4 md:p-6">
           <Outlet />
         </div>
         <footer className="border-t border-gray-200 px-4 py-3 text-center text-xs text-gray-500 dark:border-gray-800 dark:text-gray-400">

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import PageBreadcrumb from "../components/common/PageBreadCrumb";
 import PageMeta from "../components/common/PageMeta";
 import { useAuth } from "../hooks/useAuth";
@@ -9,6 +9,21 @@ import {
   type InventoryFormInputValues,
   type InventoryFormValues,
 } from "../validation/forms";
+import { Modal } from "../components/ui/modal";
+import Button from "../components/ui/button/Button";
+import Badge from "../components/ui/badge/Badge";
+import {
+  BoxIcon,
+  CheckCircleIcon,
+  PlusIcon,
+} from "../icons";
+import {
+  sanitizeIntegerString,
+  isInvalidIntegerKey,
+  isInvalidDecimalKey,
+  getInventoryStockStatus,
+  getStockStatusMetadata,
+} from "../utils/inventoryHelpers";
 
 interface InventoryItem {
   id: string;
@@ -20,8 +35,6 @@ interface InventoryItem {
   description: string;
 }
 
-
-
 const initialCategories = ["Aros", "Pistones", "Válvulas", "Juntas", "Cojinetes", "Otros"];
 
 export default function Inventario() {
@@ -31,25 +44,38 @@ export default function Inventario() {
   const [categoriesList, setCategoriesList] = useState<string[]>(initialCategories);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [bcvRate, setBcvRate] = useState<number>(0);
 
   const loadInventory = () => {
-    window.database.getInventory().then((list) => {
-      if (list && list.length > 0) {
-        setInventory(list as unknown as InventoryItem[]);
-        const categories = new Set(initialCategories);
-        list.forEach((item) => {
-          if (item.category) categories.add(item.category);
-        });
-        setCategoriesList(Array.from(categories));
-      } else {
-        setInventory([]);
-        setCategoriesList(initialCategories);
-      }
-    }).catch(console.error);
+    window.database
+      .getInventory()
+      .then((list) => {
+        if (list && list.length > 0) {
+          setInventory(list as unknown as InventoryItem[]);
+          const categories = new Set(initialCategories);
+          list.forEach((item) => {
+            if (item.category) categories.add(item.category);
+          });
+          setCategoriesList(Array.from(categories));
+        } else {
+          setInventory([]);
+          setCategoriesList(initialCategories);
+        }
+      })
+      .catch(console.error);
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     loadInventory();
+
+    window.database
+      .getBcvUsdRateStatus()
+      .then((status) => {
+        if (status?.latestRate?.valueUsd) {
+          setBcvRate(Number(status.latestRate.valueUsd));
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Dynamic category state
@@ -60,6 +86,7 @@ export default function Inventario() {
     register,
     handleSubmit,
     setValue,
+    watch,
     reset,
     formState: { errors },
   } = useForm<InventoryFormInputValues, unknown, InventoryFormValues>({
@@ -73,6 +100,20 @@ export default function Inventario() {
       description: "",
     },
   });
+
+  const watchedQuantity = watch("quantity");
+  const watchedMinStock = watch("minStock");
+  const watchedPrice = watch("priceUSD");
+  const watchedDescription = watch("description") || "";
+
+  const currentStockStatus = getInventoryStockStatus(
+    Number(watchedQuantity) || 0,
+    Number(watchedMinStock) || 0,
+  );
+  const stockStatusMeta = getStockStatusMetadata(
+    currentStockStatus,
+    Number(watchedMinStock) || 5,
+  );
 
   // Filter & Search State
   const [searchTerm, setSearchTerm] = useState("");
@@ -89,8 +130,8 @@ export default function Inventario() {
     setCurrentPage(1);
   }, [searchTerm, filterCategory, filterStockStatus, sortBy, itemsPerPage]);
 
-  const handleAddNewCategory = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const handleAddNewCategory = (e?: React.SyntheticEvent) => {
+    if (e?.preventDefault) e.preventDefault();
     const trimmed = newCategoryName.trim();
     if (!trimmed) return;
 
@@ -484,180 +525,347 @@ export default function Inventario() {
         )}
       </div>
 
-      {/* Modal Overlay para Crear / Editar */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-gray-900/60 dark:bg-black/60 backdrop-blur-sm transition-opacity">
-          <div className="relative w-full max-w-[550px] rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-800 dark:bg-gray-900 dark:text-white sm:p-8 animate-in fade-in zoom-in-95 duration-150">
-            {/* Header del Modal */}
-            <div className="mb-6 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-850 dark:text-white">
+      {/* Modal para Crear / Editar Artículo */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={closeModal}
+        className="max-w-[620px] p-6 sm:p-8"
+        showCloseButton
+      >
+        <div className="flex flex-col space-y-5">
+          {/* Header del Modal */}
+          <div className="flex items-center gap-3.5 border-b border-gray-100 pb-4 dark:border-gray-800">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-950/40 dark:text-brand-400">
+              <BoxIcon className="size-6" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
                 {editingId ? "Editar Artículo de Inventario" : "Agregar Nuevo Artículo"}
               </h3>
-              <button
-                onClick={closeModal}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition"
-              >
-                ✕
-              </button>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {editingId
+                  ? "Actualiza existencias, precio y especificaciones del repuesto."
+                  : "Registra repuestos, consumibles o partes mecánicas con alerta de stock mínimo."}
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4.5">
+            {/* Nombre del Artículo */}
+            <div>
+              <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">
+                Nombre del Artículo <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                {...register("name")}
+                placeholder="Ej. Juego de Aros Std Hilux 2.7 2TR-FE"
+                className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
+              />
+              {errors.name && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.name.message}</p>
+              )}
             </div>
 
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Nombre del Artículo
+            {/* Categoría */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">
+                  Categoría <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  {...register("name")}
-                  placeholder="Ej. Juego de Aros Std Hilux"
-                  className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
-                />
-                {errors.name && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.name.message}</p>}
-              </div>
-
-              {/* Categoría con funcionalidad de agregado dinámico */}
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Categoría
-                </label>
-                {!isAddingCategory ? (
-                  <div className="flex gap-2">
-                    <select
-                      {...register("category")}
-                      className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
-                    >
-                      {categoriesList.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => setIsAddingCategory(true)}
-                      className="rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-350 transition"
-                      title="Agregar Categoría"
-                    >
-                      + Nueva
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2 rounded-lg border border-brand-200 bg-brand-50/20 p-3 dark:border-brand-900/30 dark:bg-brand-950/10">
-                    <label className="text-xs text-brand-600 dark:text-brand-400 font-medium">
-                      Escribe el nombre de la nueva categoría:
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={newCategoryName}
-                        onChange={(e) => setNewCategoryName(e.target.value)}
-                        placeholder="Ej. Bielas, Filtros"
-                        className="w-full rounded-lg border border-gray-350 bg-white px-3 py-1.5 text-sm text-gray-800 outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleAddNewCategory}
-                        className="rounded-lg bg-brand-500 hover:bg-brand-600 px-3 py-1.5 text-xs font-medium text-white transition"
-                      >
-                        Aceptar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsAddingCategory(false);
-                          setNewCategoryName("");
-                        }}
-                        className="rounded-lg border border-gray-350 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
+                {!isAddingCategory && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingCategory(true)}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400 cursor-pointer transition"
+                  >
+                    <PlusIcon className="size-3" />
+                    <span>Nueva Categoría</span>
+                  </button>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Cantidad
-                  </label>
-                  <input
-                    type="number"
-                    {...register("quantity", { valueAsNumber: true })}
-                    min="0"
-                    placeholder="0"
-                    className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
-                  />
-                  {errors.quantity && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.quantity.message}</p>}
-                </div>
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Mínimo Alerta
-                  </label>
-                  <input
-                    type="number"
-                    {...register("minStock", { valueAsNumber: true })}
-                    min="0"
-                    placeholder="5"
-                    className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
-                  />
-                  {errors.minStock && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.minStock.message}</p>}
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Precio (USD)
-                </label>
+              {!isAddingCategory ? (
                 <div className="relative">
-                  <span className="absolute left-4 top-2.5 text-sm text-gray-500 dark:text-gray-400">
-                    $
+                  <select
+                    {...register("category")}
+                    className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500 cursor-pointer"
+                  >
+                    {categoriesList.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 rounded-xl border border-brand-200 bg-brand-50/40 p-3.5 dark:border-brand-900/40 dark:bg-brand-950/20">
+                  <span className="text-xs font-semibold text-brand-700 dark:text-brand-300">
+                    Escribe el nombre de la nueva categoría:
                   </span>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleAddNewCategory(e as unknown as React.MouseEvent);
+                        }
+                      }}
+                      placeholder="Ej. Bielas, Pistones Especiales, Empacaduras"
+                      autoFocus
+                      className="flex-1 rounded-lg border border-gray-350 bg-white px-3 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleAddNewCategory}
+                      disabled={!newCategoryName.trim()}
+                    >
+                      Agregar
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setIsAddingCategory(false);
+                        setNewCategoryName("");
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Grid 2 Columnas: Cantidad Inicial y Mínimo Alerta */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {/* Cantidad Inicial */}
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">
+                  Cantidad en Stock <span className="text-red-500">*</span>
+                </label>
+                <div className="relative flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const current = Number(watch("quantity")) || 0;
+                      setValue("quantity", Math.max(0, current - 1), {
+                        shouldValidate: true,
+                        shouldDirty: true,
+                      });
+                    }}
+                    className="absolute left-1.5 top-1/2 -translate-y-1/2 z-10 flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 font-bold text-sm select-none transition cursor-pointer"
+                    title="Disminuir 1"
+                  >
+                    −
+                  </button>
                   <input
                     type="number"
-                    {...register("priceUSD", { valueAsNumber: true })}
-                    step="0.01"
+                    {...register("quantity", {
+                      valueAsNumber: true,
+                      onChange: (e) => {
+                        const sanitized = sanitizeIntegerString(e.target.value);
+                        setValue("quantity", sanitized ? Number(sanitized) : 0, {
+                          shouldValidate: true,
+                        });
+                      },
+                    })}
+                    onKeyDown={(e) => {
+                      if (isInvalidIntegerKey(e.key)) {
+                        e.preventDefault();
+                      }
+                    }}
+                    onFocus={(e) => e.target.select()}
                     min="0"
-                    placeholder="0.00"
-                    className="w-full rounded-lg border border-gray-300 bg-transparent pl-8 pr-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
+                    step={1}
+                    placeholder="0"
+                    className="h-10 w-full text-center font-mono rounded-xl border border-gray-300 bg-white px-10 text-sm text-gray-800 outline-none transition focus:border-brand-500 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
                   />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const current = Number(watch("quantity")) || 0;
+                      setValue("quantity", current + 1, {
+                        shouldValidate: true,
+                        shouldDirty: true,
+                      });
+                    }}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 z-10 flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 font-bold text-sm select-none transition cursor-pointer"
+                    title="Aumentar 1"
+                  >
+                    +
+                  </button>
                 </div>
-                {errors.priceUSD && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.priceUSD.message}</p>}
+                {errors.quantity && (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                    {errors.quantity.message}
+                  </p>
+                )}
               </div>
 
+              {/* Mínimo Alerta */}
               <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Descripción
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">
+                  Mínimo de Alerta <span className="text-red-500">*</span>
                 </label>
-                <textarea
-                  {...register("description")}
-                  rows={3}
-                  placeholder="Detalles sobre marca, medidas o compatibilidad..."
-                  className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 dark:border-gray-700 dark:text-white dark:focus:border-brand-500"
-                />
-                {errors.description && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.description.message}</p>}
+                <div className="relative flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const current = Number(watch("minStock")) || 0;
+                      setValue("minStock", Math.max(0, current - 1), {
+                        shouldValidate: true,
+                        shouldDirty: true,
+                      });
+                    }}
+                    className="absolute left-1.5 top-1/2 -translate-y-1/2 z-10 flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 font-bold text-sm select-none transition cursor-pointer"
+                    title="Disminuir 1"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    {...register("minStock", {
+                      valueAsNumber: true,
+                      onChange: (e) => {
+                        const sanitized = sanitizeIntegerString(e.target.value);
+                        setValue("minStock", sanitized ? Number(sanitized) : 0, {
+                          shouldValidate: true,
+                        });
+                      },
+                    })}
+                    onKeyDown={(e) => {
+                      if (isInvalidIntegerKey(e.key)) {
+                        e.preventDefault();
+                      }
+                    }}
+                    onFocus={(e) => e.target.select()}
+                    min="0"
+                    step={1}
+                    placeholder="5"
+                    className="h-10 w-full text-center font-mono rounded-xl border border-gray-300 bg-white px-10 text-sm text-gray-800 outline-none transition focus:border-brand-500 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const current = Number(watch("minStock")) || 0;
+                      setValue("minStock", current + 1, {
+                        shouldValidate: true,
+                        shouldDirty: true,
+                      });
+                    }}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 z-10 flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 font-bold text-sm select-none transition cursor-pointer"
+                    title="Aumentar 1"
+                  >
+                    +
+                  </button>
+                </div>
+                {errors.minStock && (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                    {errors.minStock.message}
+                  </p>
+                )}
               </div>
+            </div>
 
-              {/* Botones del Modal */}
-              <div className="flex gap-3 pt-3 border-t border-gray-100 dark:border-gray-800">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="flex-1 rounded-lg border border-gray-300 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition duration-200 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 rounded-lg bg-brand-500 py-3 text-sm font-medium text-white hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 transition duration-200"
-                >
-                  {editingId ? "Guardar Cambios" : "Agregar Artículo"}
-                </button>
+            {/* Live Stock Feedback Indicator */}
+            <div className={`flex items-center gap-2.5 rounded-xl border p-2.5 text-xs transition ${stockStatusMeta.bgColor} border-current/10`}>
+              <Badge color={stockStatusMeta.badgeColor} variant="light" size="sm">
+                {stockStatusMeta.label}
+              </Badge>
+              <span className={`text-xs ${stockStatusMeta.textColor} opacity-90`}>
+                {stockStatusMeta.description}
+              </span>
+            </div>
+
+            {/* Precio en USD con conversión automática en VES */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">
+                  Precio de Venta (USD) <span className="text-red-500">*</span>
+                </label>
+                {bcvRate > 0 && Number(watchedPrice) > 0 && (
+                  <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                    ≈ Bs. {(Number(watchedPrice) * bcvRate).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES
+                  </span>
+                )}
               </div>
-            </form>
-          </div>
+              <div className="relative flex items-center">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono text-base font-bold text-gray-400 select-none">
+                  $
+                </span>
+                <input
+                  type="number"
+                  {...register("priceUSD", { valueAsNumber: true })}
+                  onKeyDown={(e) => {
+                    if (isInvalidDecimalKey(e.key)) {
+                      e.preventDefault();
+                    }
+                  }}
+                  onFocus={(e) => e.target.select()}
+                  step={0.01}
+                  min="0"
+                  placeholder="0.00"
+                  className="h-10 w-full font-mono rounded-xl border border-gray-300 bg-white pl-9 pr-4 text-sm text-gray-800 outline-none transition focus:border-brand-500 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
+                />
+              </div>
+              {bcvRate > 0 && (
+                <p className="mt-1 text-xxs text-gray-400">
+                  Calculado con la tasa oficial BCV: Bs. {bcvRate.toFixed(2)} por USD
+                </p>
+              )}
+              {errors.priceUSD && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  {errors.priceUSD.message}
+                </p>
+              )}
+            </div>
+
+            {/* Descripción / Notas Técnicas */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400">
+                  Descripción / Notas Técnicas
+                </label>
+                <span className="text-xs text-gray-400 font-mono">
+                  {watchedDescription.length} / 600
+                </span>
+              </div>
+              <textarea
+                {...register("description")}
+                rows={2}
+                maxLength={600}
+                placeholder="Detalles sobre marca, medidas, fabricante o compatibilidad de motor..."
+                className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-500 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
+              />
+              {errors.description && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  {errors.description.message}
+                </p>
+              )}
+            </div>
+
+            {/* Botones del Modal */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100 dark:border-gray-800">
+              <Button type="button" variant="outline" size="sm" onClick={closeModal}>
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                startIcon={<CheckCircleIcon className="size-4" />}
+              >
+                {editingId ? "Guardar Cambios" : "Agregar Artículo"}
+              </Button>
+            </div>
+          </form>
         </div>
-      )}
+      </Modal>
 
       {/* Modal de Confirmación de Eliminación */}
       {deleteConfirmId && (
